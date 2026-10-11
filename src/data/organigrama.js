@@ -1,1 +1,11 @@
-PLACEHOLDER
+const fs = require('fs');
+const path = require('path');
+const Module = require('module');
+const a = fs.readFileSync(path.join(__dirname, 'organigrama_a.js'), 'utf8');
+const b = fs.readFileSync(path.join(__dirname, 'organigrama_b.js'), 'utf8');
+const code = a + b;
+const m = new Module(module.filename, module.parent);
+m.filename = __filename;
+m.paths = Module._nodeModulePaths(path.dirname(__filename));
+m._compile(code, __filename);
+module.exports = m.exports;
