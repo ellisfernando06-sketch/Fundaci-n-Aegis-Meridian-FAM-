@@ -1,4 +1,10 @@
-const { PermissionFlagsBits, MessageFlags } = require('discord.js');
+const {
+  PermissionFlagsBits,
+  MessageFlags,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+} = require('discord.js');
 const { getDb } = require('../db');
 const auditoria = require('../services/auditoria');
 const { embedBase, COLORES } = require('../utils/plantillas');
@@ -113,14 +119,29 @@ async function onEjecutar(interaction) {
     fallos: fallos.length,
   });
 
+  // Ofrecer crear el organigrama de inmediato
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`config_roles:crear_ejecutar:${interaction.user.id}`)
+      .setLabel('Crear roles del organigrama')
+      .setStyle(ButtonStyle.Success)
+  );
+
   await interaction.editReply({
     embeds: [embedBase({
       color: COLORES.medicina,
       titulo: 'Eliminacion completada',
-      descripcion: `Roles eliminados: **${eliminados}**${fallos.length ? `\nSin eliminar: ${fallos.length}` : ''}\n\n@everyone, roles de bots y roles por encima del bot no se tocan.\nMapa de roles reiniciado (sin duplicados).`,
+      descripcion: [
+        `Roles eliminados: **${eliminados}**${fallos.length ? `\nSin eliminar: ${fallos.length}` : ''}`,
+        '',
+        '@everyone, roles de bots y roles por encima del bot no se tocan.',
+        'Mapa de roles reiniciado (sin duplicados).',
+        '',
+        'Puedes **crear ahora** todos los roles del organigrama (formato XX ●┇Nombre).',
+      ].join('\n'),
       footer: 'Administracion',
     })],
-    components: [],
+    components: [row],
   });
 }
 
