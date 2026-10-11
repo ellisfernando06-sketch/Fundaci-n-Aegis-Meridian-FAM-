@@ -9,7 +9,7 @@ const {
 const { getDb } = require('../db');
 const auditoria = require('../services/auditoria');
 const { embedBase, COLORES } = require('../utils/plantillas');
-const { ORGANIGRAMA, ROLES_APOYO, getTodosCargos, formatoRol } = require('../data/organigrama');
+const { ORGANIGRAMA, ROLES_APOYO, getTodosCargos } = require('../data/organigrama');
 const { LLAVES_INICIALES } = require('../data/llaves');
 const { normalizarNombre, similitudDice } = require('../utils/helpers');
 
@@ -39,8 +39,6 @@ async function handle(interaction, accion, args) {
       return onMenu(interaction);
     case 'crear_rama':
       return onCrearRama(interaction, args);
-    case 'crear_confirmar':
-      return onCrearConfirmar(interaction, args);
     case 'crear_ejecutar':
       return onCrearEjecutar(interaction, args);
     default:
@@ -123,14 +121,12 @@ async function analizar(interaction) {
   await guild.roles.fetch();
   const rolesServidor = [...guild.roles.cache.values()].filter((r) => r.id !== guild.id);
 
-  const { cargos, apoyo, llaves, todos } = construirEsperados();
+  const { todos } = construirEsperados();
   const db = getDb();
 
   const detectados = [];
   const parciales = [];
   const faltantes = [];
-  const noReconocidos = [];
-
   const usados = new Set();
 
   for (const esperado of todos) {
@@ -168,13 +164,6 @@ async function analizar(interaction) {
     }
   }
 
-  for (const rol of rolesServidor) {
-    if (!usados.has(rol.id) && !rol.managed) {
-      noReconocidos.push(rol);
-    }
-  }
-
-  // Problemas
   const problemas = [];
   const botMember = guild.members.me;
   if (botMember) {
@@ -305,7 +294,7 @@ async function mostrarMenuCrear(interaction) {
   });
 }
 
-async function onCrearRama(interaction, args) {
+async function onCrearRama(interaction) {
   const alcance = interaction.values[0];
   const guild = interaction.guild;
   await guild.roles.fetch();
@@ -360,7 +349,6 @@ async function onCrearRama(interaction, args) {
   const preview = aCrear.slice(0, 20).map((c) => c.nombreRol).join('\n');
   const extra = aCrear.length > 20 ? `\n… y ${aCrear.length - 20} más` : '';
 
-  // Guardar temporalmente en memoria via customId truncated - usamos confirmación con alcance
   const btn = new ButtonBuilder()
     .setCustomId(`config_roles:crear_ejecutar:${interaction.user.id}:${alcance}`)
     .setLabel(`Crear ${aCrear.length} roles`)
@@ -420,7 +408,7 @@ async function onCrearEjecutar(interaction, args) {
       const colorInt = parseInt((item.color || '#888780').replace('#', ''), 16);
       const rol = await guild.roles.create({
         name: item.nombreRol,
-        colors: colorInt,
+        color: colorInt,
         mentionable: false,
         reason: `Aegis · config_roles · ${interaction.user.tag}`,
       });
@@ -471,7 +459,7 @@ async function sincronizarColores(interaction) {
     try {
       const colorInt = parseInt(esp.color.replace('#', ''), 16);
       if (rol.color !== colorInt) {
-        await rol.setColors(colorInt, `Aegis · sync colores · ${interaction.user.tag}`);
+        await rol.setColor(colorInt);
         actualizados++;
         await new Promise((r) => setTimeout(r, 250));
       }
