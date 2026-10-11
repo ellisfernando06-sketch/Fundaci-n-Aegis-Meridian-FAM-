@@ -1,10 +1,80 @@
-const zlib = require('zlib');
-const Module = require('module');
-const path = require('path');
-const B64 = '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';
-const code = zlib.gunzipSync(Buffer.from(B64, 'base64')).toString('utf8');
-const m = new Module(module.filename, module.parent);
-m.filename = __filename;
-m.paths = Module._nodeModulePaths(path.dirname(__filename));
-m._compile(code, __filename);
-module.exports = m.exports;
+/**
+ * config_roles — punto de entrada del modulo.
+ * La logica completa se restaura; este archivo enruta acciones basicas
+ * y evita el crash del payload gzip truncado.
+ */
+const {
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  MessageFlags,
+  PermissionFlagsBits,
+} = require('discord.js');
+const { embedBase, COLORES } = require('../utils/plantillas');
+
+const prefix = 'config_roles';
+
+function esAdmin(interaction) {
+  return (
+    interaction.memberPermissions?.has(PermissionFlagsBits.Administrator) ||
+    interaction.member?.permissions?.has(PermissionFlagsBits.Administrator)
+  );
+}
+
+async function handle(interaction, accion, args) {
+  if (!esAdmin(interaction)) {
+    await interaction.reply({
+      content: 'No tienes autorizacion para esta accion.',
+      flags: MessageFlags.Ephemeral,
+    }).catch(() => {});
+    return;
+  }
+  const ownerId = args[0];
+  if (ownerId && ownerId !== interaction.user.id) {
+    await interaction.reply({
+      content: 'Solo quien abrio el menu puede usarlo.',
+      flags: MessageFlags.Ephemeral,
+    }).catch(() => {});
+    return;
+  }
+
+  // Redirigir eliminacion masiva al modulo dedicado (botones se quitan al confirmar)
+  if (accion === 'eliminar_todos_ejecutar' || accion === 'eliminar_todos_cancelar') {
+    const { handle: h } = require('./eliminar_todos_handlers');
+    const map = {
+      eliminar_todos_ejecutar: 'ejecutar',
+      eliminar_todos_cancelar: 'cancelar',
+    };
+    return h(interaction, map[accion], args);
+  }
+
+  if (accion === 'menu') {
+    const opcion = interaction.values?.[0];
+    if (opcion === 'eliminar_bot' || opcion === 'analizar' || opcion === 'crear' || opcion === 'organizar' || opcion === 'renombrar') {
+      await interaction.update({
+        embeds: [embedBase({
+          color: COLORES.neutral,
+          titulo: 'Configuracion de roles',
+          descripcion: [
+            'El modulo de analisis/prefijos se esta restaurando.',
+            '',
+            'Para **eliminar todos los roles** usa el comando:',
+            '`/eliminar_roles`',
+            '',
+            'Al confirmar, los botones se quitan solos y no se duplica la accion.',
+          ].join('\n'),
+          footer: 'Administracion',
+        })],
+        components: [],
+      }).catch(() => {});
+      return;
+    }
+  }
+
+  await interaction.reply({
+    content: 'Accion no disponible temporalmente. Usa /eliminar_roles para borrar roles.',
+    flags: MessageFlags.Ephemeral,
+  }).catch(() => {});
+}
+
+module.exports = { prefix, handle };
