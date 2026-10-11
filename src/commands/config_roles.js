@@ -10,45 +10,46 @@ const { embedBase, COLORES } = require('../utils/plantillas');
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('config_roles')
-    .setDescription('Análisis, creación y organización de roles del organigrama')
+    .setDescription('Análisis, renombrado y organización de roles del organigrama')
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 
   async execute(interaction) {
     const menu = new StringSelectMenuBuilder()
       .setCustomId(`config_roles:menu:${interaction.user.id}`)
-      .setPlaceholder('¿Qué deseas hacer?')
+      .setPlaceholder('Que deseas hacer?')
       .addOptions([
         {
           label: 'Analizar roles del servidor',
           value: 'analizar',
-          description: 'Detecta existentes, parciales y faltantes',
-          emoji: '🔍',
+          description: 'Detecta solo por nombre',
+        },
+        {
+          label: 'Renombrar al formato oficial',
+          value: 'renombrar',
+          description: 'Mismo rol, nuevo nombre XX · no se pierde nada',
         },
         {
           label: 'Crear roles faltantes',
           value: 'crear',
-          description: 'Formato XX ●┇Nombre · no toca los que ya están',
-          emoji: '🛠️',
+          description: 'Solo los que no existen por nombre',
         },
         {
-          label: 'Organizar jerarquía',
+          label: 'Organizar jerarquia',
           value: 'organizar',
-          description: 'Ordena por sección · SI encima de Director General',
-          emoji: '📐',
+          description: 'Ordena secciones · SI encima de Director General',
         },
         {
           label: 'Eliminar roles Aegis del bot',
           value: 'eliminar_bot',
-          description: 'Borra formato organigrama creados por el bot',
-          emoji: '🗑️',
+          description: 'Borra formato organigrama del bot',
         },
       ]);
 
     const embed = embedBase({
       color: COLORES.neutral,
-      titulo: '🧩 Configuración de roles',
-      descripcion: 'Formato oficial: **XX ●┇Nombre** (ej. `MED ●┇Director Médico`).\nDetecta por nombre los roles que ya tienes, crea solo faltantes y organiza con separadores.',
-      footer: 'Administración',
+      titulo: 'Configuracion de roles',
+      descripcion: 'Deteccion **solo por nombre**. Si el rol ya existe, se **renombra** al formato oficial y se conserva (miembros, permisos, ID).',
+      footer: 'Administracion',
     });
 
     await interaction.reply({
