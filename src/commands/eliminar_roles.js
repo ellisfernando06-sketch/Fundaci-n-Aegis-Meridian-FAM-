@@ -19,9 +19,9 @@ module.exports = {
     await guild.roles.fetch();
 
     const candidatos = [...guild.roles.cache.values()].filter((r) => {
-      if (r.id === guild.id) return false; // @everyone
-      if (r.managed) return false; // bots / integraciones
-      if (!r.editable) return false; // por encima del bot o sin permiso
+      if (r.id === guild.id) return false;
+      if (r.managed) return false;
+      if (!r.editable) return false;
       return true;
     });
 
@@ -46,11 +46,11 @@ module.exports = {
 
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder()
-        .setCustomId(`config_roles:eliminar_todos_ejecutar:${interaction.user.id}`)
+        .setCustomId(`eliminar_todos:ejecutar:${interaction.user.id}`)
         .setLabel(`Eliminar ${candidatos.length} roles`)
         .setStyle(ButtonStyle.Danger),
       new ButtonBuilder()
-        .setCustomId(`config_roles:eliminar_todos_cancelar:${interaction.user.id}`)
+        .setCustomId(`eliminar_todos:cancelar:${interaction.user.id}`)
         .setLabel('Cancelar')
         .setStyle(ButtonStyle.Secondary)
     );
@@ -72,6 +72,7 @@ module.exports = {
           candidatos.length > 30 ? `… +${candidatos.length - 30}` : '',
           '',
           'Esta accion no se puede deshacer.',
+          'Al confirmar, los botones desaparecen para evitar duplicacion.',
         ].filter(Boolean).join('\n'),
         footer: 'Confirmacion requerida',
       })],
