@@ -11,15 +11,64 @@ const auditoria = require('../services/auditoria');
 const { embedBase, COLORES } = require('../utils/plantillas');
 const { ORGANIGRAMA, ROLES_APOYO, getTodosCargos } = require('../data/organigrama');
 const { LLAVES_INICIALES } = require('../data/llaves');
-const { normalizarNombre, similitudDice } = require('../utils/helpers');
+const { normalizarNombre, similitudDice, truncar } = require('../utils/helpers');
 
 const prefix = 'config_roles';
+
+/** Emojis de representación por tipo de faltante */
+const EMOJI = {
+  detectado: '✅',
+  parcial: '⚠️',
+  cargo: '📋',
+  apoyo: '🏷️',
+  llave: '🔑',
+  bot: '🤖',
+  original: '📌',
+  problema: '🔺',
+};
+
+const EMOJI_RAMA = {
+  cupula: '🏛️',
+  medicina: '🩺',
+  investigacion: '🔬',
+  clase_d: '⛓️',
+  seguridad: '🛡️',
+  ftm: '⚔️',
+  err: '🚨',
+  inteligencia: '🕵️',
+  seguridad_interna: '🔒',
+  insurgencia: '💀',
+  apoyo: '🏷️',
+  llaves: '🔑',
+};
 
 function esAdmin(interaction) {
   return (
     interaction.memberPermissions?.has(PermissionFlagsBits.Administrator) ||
     interaction.member?.permissions?.has(PermissionFlagsBits.Administrator)
   );
+}
+
+function asegurarColumnaOrigen() {
+  const db = getDb();
+  try {
+    db.exec(`ALTER TABLE roles_map ADD COLUMN origen TEXT DEFAULT 'existente'`);
+  } catch (_) {
+    // columna ya existe
+  }
+}
+
+function guardarMapa(cargoKey, roleId, nombreRol, origen) {
+  const db = getDb();
+  asegurarColumnaOrigen();
+  db.prepare(
+    `INSERT INTO roles_map (cargo_key, role_id, nombre_rol, origen) VALUES (?, ?, ?, ?)
+     ON CONFLICT(cargo_key) DO UPDATE SET
+       role_id = excluded.role_id,
+       nombre_rol = excluded.nombre_rol,
+       origen = excluded.origen,
+       actualizado_en = datetime('now')`
+  ).run(cargoKey, roleId, nombreRol, origen);
 }
 
 async function handle(interaction, accion, args) {
@@ -38,9 +87,13 @@ async function handle(interaction, accion, args) {
     case 'menu':
       return onMenu(interaction);
     case 'crear_rama':
-      return onCrearRama(interaction, args);
+      return onCrearRama(interaction);
     case 'crear_ejecutar':
       return onCrearEjecutar(interaction, args);
+    case 'eliminar_confirmar':
+      return onEliminarConfirmar(interaction);
+    case 'eliminar_ejecutar':
+      return onEliminarEjecutar(interaction);
     default:
       await interaction.reply({ content: 'Acción no reconocida.', flags: MessageFlags.Ephemeral }).catch(() => {});
   }
@@ -48,19 +101,20 @@ async function handle(interaction, accion, args) {
 
 async function onMenu(interaction) {
   const opcion = interaction.values[0];
-
   switch (opcion) {
     case 'analizar':
       return analizar(interaction);
     case 'crear':
       return mostrarMenuCrear(interaction);
+    case 'eliminar_bot':
+      return onEliminarConfirmar(interaction);
     case 'vincular':
       await interaction.update({
         embeds: [
           embedBase({
             color: COLORES.neutral,
             titulo: '🔗 Vincular roles',
-            descripcion: 'Ejecuta primero **Analizar roles**. Las coincidencias parciales aparecerán con opciones de vinculación en el informe.',
+            descripcion: 'Ejecuta **Analizar roles**. Los roles que ya existían se vinculan automáticamente al organigrama.',
             footer: 'Administración',
           }),
         ],
@@ -69,8 +123,6 @@ async function onMenu(interaction) {
       break;
     case 'sincronizar':
       return sincronizarColores(interaction);
-    case 'exportar':
-      return analizar(interaction);
   }
 }
 
@@ -109,6 +161,32 @@ function construirEsperados() {
   return { cargos, apoyo, llaves, todos: [...cargos, ...apoyo, ...llaves] };
 }
 
+/**
+ * Busca un rol de la misma rama ya detectado para heredar estilo (hoist, mentionable).
+ */
+function estiloReferencia(guild, rama, detectados) {
+  const deRama = detectados.filter((d) => d.esperado.rama === rama && d.rol);
+  if (deRama.length) {
+    const ref = deRama[0].rol;
+    return {
+      hoist: ref.hoist,
+      mentionable: ref.mentionable,
+      color: ref.color || null,
+    };
+  }
+  // Buscar cualquier rol del servidor con prefijo similar
+  const prefijo = ORGANIGRAMA[rama]?.prefijo;
+  if (prefijo) {
+    const similar = guild.roles.cache.find(
+      (r) => r.name.startsWith(`[${prefijo}]`) || r.name.startsWith(`${prefijo} `)
+    );
+    if (similar) {
+      return { hoist: similar.hoist, mentionable: similar.mentionable, color: similar.color || null };
+    }
+  }
+  return { hoist: false, mentionable: false, color: null };
+}
+
 async function analizar(interaction) {
   await interaction.deferUpdate();
 
@@ -119,10 +197,11 @@ async function analizar(interaction) {
   }
 
   await guild.roles.fetch();
-  const rolesServidor = [...guild.roles.cache.values()].filter((r) => r.id !== guild.id);
+  const rolesServidor = [...guild.roles.cache.values()].filter((r) => r.id !== guild.id && !r.managed);
 
   const { todos } = construirEsperados();
   const db = getDb();
+  asegurarColumnaOrigen();
 
   const detectados = [];
   const parciales = [];
@@ -152,10 +231,10 @@ async function analizar(interaction) {
     if (match && score === 1) {
       detectados.push({ esperado, rol: match });
       usados.add(match.id);
-      db.prepare(
-        `INSERT INTO roles_map (cargo_key, role_id, nombre_rol) VALUES (?, ?, ?)
-         ON CONFLICT(cargo_key) DO UPDATE SET role_id = excluded.role_id, nombre_rol = excluded.nombre_rol, actualizado_en = datetime('now')`
-      ).run(esperado.key, match.id, match.name);
+      // Conservar origen bot si ya estaba marcado; si no, es existente
+      const prev = db.prepare('SELECT origen FROM roles_map WHERE cargo_key = ?').get(esperado.key);
+      const origen = prev?.origen === 'bot' ? 'bot' : 'existente';
+      guardarMapa(esperado.key, match.id, match.name, origen);
     } else if (match && score >= 0.85) {
       parciales.push({ esperado, rol: match, score });
       usados.add(match.id);
@@ -164,88 +243,159 @@ async function analizar(interaction) {
     }
   }
 
+  // Roles creados por el bot (según mapa)
+  const delBot = db.prepare("SELECT * FROM roles_map WHERE origen = 'bot'").all();
+  const originales = db.prepare("SELECT * FROM roles_map WHERE origen = 'existente' OR origen IS NULL").all();
+
   const problemas = [];
   const botMember = guild.members.me;
   if (botMember) {
     const botPos = botMember.roles.highest.position;
     for (const d of detectados) {
       if (d.rol.position >= botPos) {
-        problemas.push(`El rol **${d.rol.name}** está por encima o al mismo nivel que el bot.`);
-      }
-      if (d.rol.permissions.has(PermissionFlagsBits.Administrator)) {
-        problemas.push(`El rol **${d.rol.name}** tiene permiso Administrator.`);
+        problemas.push(`${EMOJI.problema} **${d.rol.name}** está al nivel del bot o por encima.`);
       }
     }
-  }
-  if (rolesServidor.length > 240) {
-    problemas.push(`Cercanía al límite de 250 roles (${rolesServidor.length} actuales).`);
-  }
-
-  const porRama = {};
-  for (const f of faltantes.filter((x) => x.tipo === 'cargo')) {
-    porRama[f.rama] = (porRama[f.rama] || 0) + 1;
   }
 
   const embeds = [];
 
+  // Resumen
   embeds.push(
     embedBase({
       color: COLORES.neutral,
       titulo: '🧩 Informe de roles',
       campos: [
-        { name: '✅ Detectados', value: `${detectados.length} de ${todos.length}`, inline: true },
-        { name: '⚠️ Parciales', value: String(parciales.length), inline: true },
-        { name: '❌ Faltantes', value: String(faltantes.length), inline: true },
+        { name: `${EMOJI.detectado} Detectados (ya existían)`, value: String(detectados.filter((d) => {
+          const row = db.prepare('SELECT origen FROM roles_map WHERE cargo_key = ?').get(d.esperado.key);
+          return row?.origen !== 'bot';
+        }).length), inline: true },
+        { name: `${EMOJI.bot} Creados por el bot`, value: String(delBot.length), inline: true },
+        { name: `${EMOJI.parcial} Parciales`, value: String(parciales.length), inline: true },
+        { name: `${EMOJI.cargo} Cargos faltantes`, value: String(faltantes.filter((f) => f.tipo === 'cargo').length), inline: true },
+        { name: `${EMOJI.apoyo} Apoyo faltantes`, value: String(faltantes.filter((f) => f.tipo === 'apoyo').length), inline: true },
+        { name: `${EMOJI.llave} Llaves faltantes`, value: String(faltantes.filter((f) => f.tipo === 'llave').length), inline: true },
       ],
-      footer: 'Análisis',
+      footer: 'Análisis · los roles originales no se modifican',
     })
   );
 
-  if (faltantes.filter((f) => f.tipo === 'cargo').length) {
-    const lineas = Object.entries(porRama)
-      .map(([rama, n]) => `**${ORGANIGRAMA[rama]?.nombre || rama}**: ${n}`)
+  // Detectados originales (muestra muestra)
+  const originalesDetectados = detectados.filter((d) => {
+    const row = db.prepare('SELECT origen FROM roles_map WHERE cargo_key = ?').get(d.esperado.key);
+    return row?.origen !== 'bot';
+  });
+  if (originalesDetectados.length) {
+    const lineas = originalesDetectados
+      .slice(0, 15)
+      .map((d) => `${EMOJI.original} **${d.rol.name}** → \`${d.esperado.key}\`)
       .join('\n');
+    const extra = originalesDetectados.length > 15 ? `\n… y ${originalesDetectados.length - 15} más` : '';
+    embeds.push(
+      embedBase({
+        color: COLORES.medicina,
+        titulo: `${EMOJI.detectado} Roles que ya estaban`,
+        descripcion: truncar(lineas + extra),
+        footer: 'Se conservan · vinculados al organigrama',
+        timestamp: false,
+      })
+    );
+  }
+
+  // Faltantes por tipo con emojis distintos
+  const faltCargo = faltantes.filter((f) => f.tipo === 'cargo');
+  if (faltCargo.length) {
+    const porRama = {};
+    for (const f of faltCargo) {
+      if (!porRama[f.rama]) porRama[f.rama] = [];
+      porRama[f.rama].push(f.nombreRol);
+    }
+    const lineas = Object.entries(porRama)
+      .map(([rama, nombres]) => {
+        const emoji = EMOJI_RAMA[rama] || EMOJI.cargo;
+        const titulo = ORGANIGRAMA[rama]?.nombre || rama;
+        return `${emoji} **${titulo}** (${nombres.length})\n${nombres.slice(0, 8).map((n) => `· ${n}`).join('\n')}${nombres.length > 8 ? `\n· … +${nombres.length - 8}` : ''}`;
+      })
+      .join('\n\n');
     embeds.push(
       embedBase({
         color: COLORES.denegado,
-        titulo: '❌ Cargos faltantes',
-        descripcion: lineas,
+        titulo: `${EMOJI.cargo} Cargos faltantes`,
+        descripcion: truncar(lineas),
         footer: 'Análisis',
         timestamp: false,
       })
     );
   }
 
-  const apoyoFaltantes = faltantes.filter((f) => f.tipo === 'apoyo');
-  if (apoyoFaltantes.length) {
+  const faltApoyo = faltantes.filter((f) => f.tipo === 'apoyo');
+  if (faltApoyo.length) {
     embeds.push(
       embedBase({
         color: COLORES.neutral,
-        titulo: '➕ Roles de apoyo recomendados',
-        descripcion: apoyoFaltantes.map((f) => f.nombreRol).join('\n') + '\n\nSirven para áreas, niveles de autorización, estado (Verificado / Suspendido / Visitante) y administración del bot.',
+        titulo: `${EMOJI.apoyo} Roles de apoyo faltantes`,
+        descripcion: truncar(faltApoyo.map((f) => `${EMOJI.apoyo} ${f.nombreRol}`).join('\n')),
         footer: 'Análisis',
         timestamp: false,
       })
     );
   }
 
-  const llavesFaltantes = faltantes.filter((f) => f.tipo === 'llave');
-  const llavesDetectadas = detectados.filter((d) => d.esperado.tipo === 'llave');
-  embeds.push(
-    embedBase({
-      color: 0xd4a017,
-      titulo: '🔑 Llaves',
-      descripcion: `Detectadas: **${llavesDetectadas.length}** · Faltantes: **${llavesFaltantes.length}**\n\nLa creación y edición de llaves se gestiona con **/config_llaves**.`,
-      footer: 'Análisis',
-      timestamp: false,
-    })
-  );
+  const faltLlave = faltantes.filter((f) => f.tipo === 'llave');
+  if (faltLlave.length) {
+    embeds.push(
+      embedBase({
+        color: 0xd4a017,
+        titulo: `${EMOJI.llave} Llaves faltantes`,
+        descripcion: truncar(
+          faltLlave.slice(0, 20).map((f) => `${EMOJI.llave} ${f.nombreRol}`).join('\n') +
+          (faltLlave.length > 20 ? `\n… +${faltLlave.length - 20}` : '') +
+          '\n\nSe gestionan con **/config_llaves**.'
+        ),
+        footer: 'Análisis',
+        timestamp: false,
+      })
+    );
+  }
+
+  if (parciales.length) {
+    embeds.push(
+      embedBase({
+        color: 0xe8b923,
+        titulo: `${EMOJI.parcial} Coincidencias parciales`,
+        descripcion: truncar(
+          parciales
+            .slice(0, 12)
+            .map((p) => `${EMOJI.parcial} **${p.rol.name}** ≈ ${p.esperado.nombreRol} (${Math.round(p.score * 100)}%)`)
+            .join('\n')
+        ),
+        footer: 'No se vinculan solas · revisa manualmente',
+        timestamp: false,
+      })
+    );
+  }
+
+  if (delBot.length) {
+    embeds.push(
+      embedBase({
+        color: COLORES.cupula,
+        titulo: `${EMOJI.bot} Roles creados por el bot`,
+        descripcion: truncar(
+          delBot.slice(0, 15).map((r) => `${EMOJI.bot} ${r.nombre_rol || r.cargo_key}`).join('\n') +
+          (delBot.length > 15 ? `\n… +${delBot.length - 15}` : '') +
+          '\n\nPuedes eliminarlos con la opción **Eliminar roles creados por el bot**.'
+        ),
+        footer: 'Solo estos se pueden borrar desde el bot',
+        timestamp: false,
+      })
+    );
+  }
 
   if (problemas.length) {
     embeds.push(
       embedBase({
         color: COLORES.denegado,
-        titulo: '🔺 Problemas detectados',
+        titulo: `${EMOJI.problema} Problemas`,
         descripcion: problemas.slice(0, 10).join('\n'),
         footer: 'Análisis',
         timestamp: false,
@@ -256,7 +406,8 @@ async function analizar(interaction) {
   auditoria.registrar(interaction.user.id, 'CONFIG_ROLES.ANALIZAR', {
     detectados: detectados.length,
     faltantes: faltantes.length,
-    parciales: parciales.length,
+    delBot: delBot.length,
+    originales: originales.length,
   });
 
   await interaction.editReply({
@@ -267,13 +418,18 @@ async function analizar(interaction) {
 
 async function mostrarMenuCrear(interaction) {
   const opciones = [
-    { label: 'Todo lo faltante', value: 'todo', description: 'Cargos + apoyo (sin llaves)' },
-    { label: 'Solo roles de apoyo', value: 'apoyo' },
+    { label: 'Todo lo faltante (cargos + apoyo)', value: 'todo', emoji: '🛠️' },
+    { label: 'Solo roles de apoyo', value: 'apoyo', emoji: '🏷️' },
   ];
 
   for (const [key, rama] of Object.entries(ORGANIGRAMA)) {
     if (opciones.length >= 25) break;
-    opciones.push({ label: rama.nombre, value: key, description: `Rama ${rama.prefijo}` });
+    opciones.push({
+      label: rama.nombre,
+      value: key,
+      description: `Rama ${rama.prefijo}`,
+      emoji: EMOJI_RAMA[key] || '📋',
+    });
   }
 
   const menu = new StringSelectMenuBuilder()
@@ -286,7 +442,7 @@ async function mostrarMenuCrear(interaction) {
       embedBase({
         color: COLORES.neutral,
         titulo: '🛠️ Crear roles faltantes',
-        descripcion: 'Selecciona el alcance. Se mostrará una vista previa antes de crear nada.',
+        descripcion: 'Solo se crean los que **no existen**. Los que ya estaban se dejan intactos. El estilo (hoist / mencionable) se copia de roles de la misma rama si hay alguno detectado.',
         footer: 'Administración',
       }),
     ],
@@ -301,19 +457,13 @@ async function onCrearRama(interaction) {
 
   const { cargos, apoyo } = construirEsperados();
   let candidatos = [];
-
-  if (alcance === 'todo') {
-    candidatos = [...cargos, ...apoyo];
-  } else if (alcance === 'apoyo') {
-    candidatos = [...apoyo];
-  } else {
-    candidatos = cargos.filter((c) => c.rama === alcance);
-  }
+  if (alcance === 'todo') candidatos = [...cargos, ...apoyo];
+  else if (alcance === 'apoyo') candidatos = [...apoyo];
+  else candidatos = cargos.filter((c) => c.rama === alcance);
 
   const existentes = new Set(
     [...guild.roles.cache.values()].map((r) => normalizarNombre(r.name))
   );
-
   const aCrear = candidatos.filter((c) => !existentes.has(normalizarNombre(c.nombreRol)));
 
   if (aCrear.length === 0) {
@@ -322,7 +472,7 @@ async function onCrearRama(interaction) {
         embedBase({
           color: COLORES.medicina,
           titulo: '🛠️ Crear roles',
-          descripcion: 'No hay roles faltantes en el alcance seleccionado.',
+          descripcion: `${EMOJI.detectado} No hay faltantes en este alcance. Los roles que ya estaban se conservan.`,
           footer: 'Administración',
         }),
       ],
@@ -346,20 +496,23 @@ async function onCrearRama(interaction) {
     return;
   }
 
-  const preview = aCrear.slice(0, 20).map((c) => c.nombreRol).join('\n');
+  const preview = aCrear
+    .slice(0, 20)
+    .map((c) => `${EMOJI_RAMA[c.rama] || EMOJI.cargo} ${c.nombreRol}`)
+    .join('\n');
   const extra = aCrear.length > 20 ? `\n… y ${aCrear.length - 20} más` : '';
 
   const btn = new ButtonBuilder()
     .setCustomId(`config_roles:crear_ejecutar:${interaction.user.id}:${alcance}`)
-    .setLabel(`Crear ${aCrear.length} roles`)
+    .setLabel(`Crear ${aCrear.length} faltantes`)
     .setStyle(ButtonStyle.Success);
 
   await interaction.update({
     embeds: [
       embedBase({
         color: COLORES.neutral,
-        titulo: '🛠️ Vista previa',
-        descripcion: `Se crearán **${aCrear.length}** roles:\n\n${preview}${extra}\n\nSin permisos Administrator. No mencionables.`,
+        titulo: '🛠️ Vista previa · solo faltantes',
+        descripcion: `Se crearán **${aCrear.length}** roles. Los existentes no se tocan.\n\n${preview}${extra}`,
         footer: 'Administración',
       }),
     ],
@@ -372,7 +525,7 @@ async function onCrearEjecutar(interaction, args) {
   await interaction.deferUpdate();
 
   const guild = interaction.guild;
-  if (!guild.members.me.permissions.has(PermissionFlagsBits.ManageRoles)) {
+  if (!guild.members.me?.permissions?.has(PermissionFlagsBits.ManageRoles)) {
     await interaction.editReply({
       embeds: [
         embedBase({
@@ -388,38 +541,46 @@ async function onCrearEjecutar(interaction, args) {
   }
 
   await guild.roles.fetch();
-  const { cargos, apoyo } = construirEsperados();
+  const { cargos, apoyo, todos } = construirEsperados();
+
+  // Detectar existentes para heredar estilo
+  const rolesServidor = [...guild.roles.cache.values()].filter((r) => !r.managed);
+  const detectados = [];
+  for (const esperado of todos) {
+    const normEsp = normalizarNombre(esperado.nombreRol);
+    const match = rolesServidor.find((r) => normalizarNombre(r.name) === normEsp);
+    if (match) detectados.push({ esperado, rol: match });
+  }
+
   let candidatos = [];
   if (alcance === 'todo') candidatos = [...cargos, ...apoyo];
   else if (alcance === 'apoyo') candidatos = [...apoyo];
   else candidatos = cargos.filter((c) => c.rama === alcance);
 
-  const existentes = new Set(
-    [...guild.roles.cache.values()].map((r) => normalizarNombre(r.name))
-  );
+  const existentes = new Set(rolesServidor.map((r) => normalizarNombre(r.name)));
   const aCrear = candidatos.filter((c) => !existentes.has(normalizarNombre(c.nombreRol)));
 
-  const db = getDb();
   let creados = 0;
   const errores = [];
 
   for (const item of aCrear) {
     try {
-      const colorInt = parseInt((item.color || '#888780').replace('#', ''), 16);
+      const estilo = estiloReferencia(guild, item.rama, detectados);
+      const colorInt = estilo.color && estilo.color !== 0
+        ? estilo.color
+        : parseInt((item.color || '#888780').replace('#', ''), 16);
+
       const rol = await guild.roles.create({
         name: item.nombreRol,
         color: colorInt,
-        mentionable: false,
-        reason: `Aegis · config_roles · ${interaction.user.tag}`,
+        hoist: estilo.hoist,
+        mentionable: estilo.mentionable,
+        reason: `Aegis · config_roles · bot · ${interaction.user.tag}`,
       });
 
-      db.prepare(
-        `INSERT INTO roles_map (cargo_key, role_id, nombre_rol) VALUES (?, ?, ?)
-         ON CONFLICT(cargo_key) DO UPDATE SET role_id = excluded.role_id, nombre_rol = excluded.nombre_rol, actualizado_en = datetime('now')`
-      ).run(item.key, rol.id, rol.name);
-
+      guardarMapa(item.key, rol.id, rol.name, 'bot');
       creados++;
-      await new Promise((r) => setTimeout(r, 300));
+      await new Promise((r) => setTimeout(r, 350));
     } catch (err) {
       errores.push(item.nombreRol);
       console.error('[Crear rol]', err);
@@ -433,7 +594,121 @@ async function onCrearEjecutar(interaction, args) {
       embedBase({
         color: COLORES.medicina,
         titulo: '🛠️ Roles creados',
-        descripcion: `Creados: **${creados}**${errores.length ? `\nErrores: ${errores.length}` : ''}`,
+        descripcion: `${EMOJI.bot} Creados por el bot: **${creados}**\n${EMOJI.original} Originales: sin cambios${errores.length ? `\n${EMOJI.problema} Errores: ${errores.length}` : ''}`,
+        footer: 'Administración',
+      }),
+    ],
+    components: [],
+  });
+}
+
+async function onEliminarConfirmar(interaction) {
+  const db = getDb();
+  asegurarColumnaOrigen();
+  const delBot = db.prepare("SELECT * FROM roles_map WHERE origen = 'bot'").all();
+
+  if (!delBot.length) {
+    const method = interaction.deferred || interaction.replied ? 'editReply' : 'update';
+    await interaction[method]({
+      embeds: [
+        embedBase({
+          color: COLORES.neutral,
+          titulo: '🗑️ Eliminar roles del bot',
+          descripcion: 'No hay roles marcados como creados por el bot. Ejecuta **Analizar** primero si acabas de desplegar.',
+          footer: 'Administración',
+        }),
+      ],
+      components: [],
+    }).catch(() => {});
+    return;
+  }
+
+  const lista = delBot.slice(0, 20).map((r) => `${EMOJI.bot} ${r.nombre_rol || r.cargo_key}`).join('\n');
+  const extra = delBot.length > 20 ? `\n… y ${delBot.length - 20} más` : '';
+
+  const btn = new ButtonBuilder()
+    .setCustomId(`config_roles:eliminar_ejecutar:${interaction.user.id}`)
+    .setLabel(`Eliminar ${delBot.length} roles del bot`)
+    .setStyle(ButtonStyle.Danger);
+
+  const method = interaction.isStringSelectMenu() ? 'update' : 'editReply';
+  await interaction[method]({
+    embeds: [
+      embedBase({
+        color: COLORES.denegado,
+        titulo: '🗑️ Eliminar roles creados por el bot',
+        descripcion: `Se eliminarán **solo** estos roles. Los que ya existían en el servidor **no se tocan**.\n\n${lista}${extra}`,
+        footer: 'Confirmación requerida',
+      }),
+    ],
+    components: [new ActionRowBuilder().addComponents(btn)],
+  }).catch(async () => {
+    await interaction.reply({
+      embeds: [
+        embedBase({
+          color: COLORES.denegado,
+          titulo: '🗑️ Eliminar roles creados por el bot',
+          descripcion: `Se eliminarán **solo** estos roles.\n\n${lista}${extra}`,
+          footer: 'Confirmación requerida',
+        }),
+      ],
+      components: [new ActionRowBuilder().addComponents(btn)],
+      flags: MessageFlags.Ephemeral,
+    }).catch(() => {});
+  });
+}
+
+async function onEliminarEjecutar(interaction) {
+  await interaction.deferUpdate();
+
+  const guild = interaction.guild;
+  if (!guild.members.me?.permissions?.has(PermissionFlagsBits.ManageRoles)) {
+    await interaction.editReply({
+      embeds: [
+        embedBase({
+          color: COLORES.denegado,
+          titulo: '🗑️ Sin permiso',
+          descripcion: 'El bot necesita **Manage Roles**.',
+          footer: 'Administración',
+        }),
+      ],
+      components: [],
+    });
+    return;
+  }
+
+  const db = getDb();
+  asegurarColumnaOrigen();
+  const delBot = db.prepare("SELECT * FROM roles_map WHERE origen = 'bot'").all();
+
+  let eliminados = 0;
+  const fallos = [];
+
+  for (const row of delBot) {
+    try {
+      const rol = guild.roles.cache.get(row.role_id) || await guild.roles.fetch(row.role_id).catch(() => null);
+      if (rol && rol.editable) {
+        await rol.delete(`Aegis · eliminar roles del bot · ${interaction.user.tag}`);
+        eliminados++;
+        await new Promise((r) => setTimeout(r, 350));
+      } else if (rol && !rol.editable) {
+        fallos.push(row.nombre_rol || row.cargo_key);
+      }
+      db.prepare('DELETE FROM roles_map WHERE cargo_key = ? AND origen = ?').run(row.cargo_key, 'bot');
+    } catch (err) {
+      fallos.push(row.nombre_rol || row.cargo_key);
+      console.error('[Eliminar rol bot]', err);
+    }
+  }
+
+  auditoria.registrar(interaction.user.id, 'CONFIG_ROLES.ELIMINAR_BOT', { eliminados, fallos: fallos.length });
+
+  await interaction.editReply({
+    embeds: [
+      embedBase({
+        color: COLORES.medicina,
+        titulo: '🗑️ Roles del bot eliminados',
+        descripcion: `${EMOJI.bot} Eliminados: **${eliminados}**\n${EMOJI.original} Roles originales: intactos${fallos.length ? `\n${EMOJI.problema} No se pudieron borrar: ${fallos.length}` : ''}`,
         footer: 'Administración',
       }),
     ],
@@ -455,7 +730,7 @@ async function sincronizarColores(interaction) {
     const esp = porKey[row.cargo_key];
     if (!esp || !esp.color) continue;
     const rol = guild.roles.cache.get(row.role_id);
-    if (!rol) continue;
+    if (!rol || !rol.editable) continue;
     try {
       const colorInt = parseInt(esp.color.replace('#', ''), 16);
       if (rol.color !== colorInt) {
