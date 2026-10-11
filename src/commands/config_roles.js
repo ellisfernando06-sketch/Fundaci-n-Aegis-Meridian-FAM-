@@ -19,6 +19,12 @@ module.exports = {
       .setPlaceholder('Selecciona una accion')
       .addOptions([
         {
+          label: 'Ver organigrama',
+          value: 'organigrama',
+          description: 'Jerarquia completa de roles',
+          emoji: '📋',
+        },
+        {
           label: 'Analizar roles del servidor',
           value: 'analizar',
           description: 'Detecta existentes y faltantes por nombre',
@@ -42,12 +48,13 @@ module.exports = {
       color: COLORES.neutral,
       titulo: 'Configuracion de roles',
       descripcion: [
+        '**Ver organigrama** — jerarquia oficial completa.',
         '**Analizar** — detecta roles por nombre.',
-        '**Crear faltantes** — crea los del organigrama que falten.',
+        '**Crear faltantes** — crea los que falten.',
         '**Organizar** — los ordena por seccion.',
         '',
-        'Para borrar todos: `/eliminar_roles`',
-        '(despues de borrar puedes crear el organigrama de un clic).',
+        'Orden: FUNDACION → DIRECCIONES → STAFF → SOPORTE → …',
+        'Borrar todos: `/eliminar_roles`',
       ].join('\n'),
       footer: 'Administracion · Fundacion Aegis-Meridian',
     });
