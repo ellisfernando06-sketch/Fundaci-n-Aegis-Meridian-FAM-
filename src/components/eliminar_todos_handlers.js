@@ -1,9 +1,42 @@
-const { PermissionFlagsBits } = require('discord.js');
+const { PermissionFlagsBits, MessageFlags } = require('discord.js');
 const { getDb } = require('../db');
 const auditoria = require('../services/auditoria');
 const { embedBase, COLORES } = require('../utils/plantillas');
 
-async function onEliminarTodosCancelar(interaction) {
+const prefix = 'eliminar_todos';
+
+function esAdmin(interaction) {
+  return (
+    interaction.memberPermissions?.has(PermissionFlagsBits.Administrator) ||
+    interaction.member?.permissions?.has(PermissionFlagsBits.Administrator)
+  );
+}
+
+async function handle(interaction, accion, args) {
+  if (!esAdmin(interaction)) {
+    await interaction.reply({
+      content: 'No tienes autorizacion para esta accion.',
+      flags: MessageFlags.Ephemeral,
+    }).catch(() => {});
+    return;
+  }
+  const ownerId = args[0];
+  if (ownerId && ownerId !== interaction.user.id) {
+    await interaction.reply({
+      content: 'Solo quien abrio el menu puede usarlo.',
+      flags: MessageFlags.Ephemeral,
+    }).catch(() => {});
+    return;
+  }
+  if (accion === 'cancelar') return onCancelar(interaction);
+  if (accion === 'ejecutar') return onEjecutar(interaction);
+  await interaction.reply({
+    content: 'Accion no reconocida.',
+    flags: MessageFlags.Ephemeral,
+  }).catch(() => {});
+}
+
+async function onCancelar(interaction) {
   const payload = {
     embeds: [embedBase({
       color: COLORES.neutral,
@@ -18,7 +51,7 @@ async function onEliminarTodosCancelar(interaction) {
   });
 }
 
-async function onEliminarTodosEjecutar(interaction) {
+async function onEjecutar(interaction) {
   // Al confirmar: quitar botones de inmediato (evita doble clic y duplicacion)
   await interaction.update({
     embeds: [embedBase({
@@ -84,11 +117,11 @@ async function onEliminarTodosEjecutar(interaction) {
     embeds: [embedBase({
       color: COLORES.medicina,
       titulo: 'Eliminacion completada',
-      descripcion: `Roles eliminados: **${eliminados}**${fallos.length ? `\nSin eliminar: ${fallos.length}` : ''}\n\n@everyone, roles de bots y roles por encima del bot no se tocan.\nMapa de roles reiniciado.`,
+      descripcion: `Roles eliminados: **${eliminados}**${fallos.length ? `\nSin eliminar: ${fallos.length}` : ''}\n\n@everyone, roles de bots y roles por encima del bot no se tocan.\nMapa de roles reiniciado (sin duplicados).`,
       footer: 'Administracion',
     })],
     components: [],
   });
 }
 
-module.exports = { onEliminarTodosCancelar, onEliminarTodosEjecutar };
+module.exports = { prefix, handle };
