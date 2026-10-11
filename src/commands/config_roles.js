@@ -10,13 +10,13 @@ const { embedBase, COLORES } = require('../utils/plantillas');
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('config_roles')
-    .setDescription('Analisis, renombrado y organizacion de roles del organigrama')
+    .setDescription('Analisis, prefijos y organizacion de roles del organigrama')
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 
   async execute(interaction) {
     const menu = new StringSelectMenuBuilder()
       .setCustomId(`config_roles:menu:${interaction.user.id}`)
-      .setPlaceholder('Que deseas hacer?')
+      .setPlaceholder('Selecciona una accion')
       .addOptions([
         {
           label: 'Analizar roles del servidor',
@@ -25,9 +25,9 @@ module.exports = {
           emoji: '🔍',
         },
         {
-          label: 'Renombrar al formato oficial',
+          label: 'Aplicar prefijos oficiales',
           value: 'renombrar',
-          description: 'Solo cambia el nombre · mismo rol, mismos miembros',
+          description: 'Solo cambia el prefijo · deja el nombre como esta',
           emoji: '✏️',
         },
         {
@@ -45,22 +45,22 @@ module.exports = {
         {
           label: 'Eliminar roles creados por el bot',
           value: 'eliminar_bot',
-          description: 'Borra solo los que el bot creo (no los renombrados)',
+          description: 'Borra solo los que el bot creo',
           emoji: '🗑️',
         },
       ]);
 
     const embed = embedBase({
       color: COLORES.neutral,
-      titulo: '🧩 Configuracion de roles',
+      titulo: 'Configuracion de roles',
       descripcion: [
-        'El bot **lee todos los roles** del servidor y los empareja **solo por nombre**.',
+        'El bot **lee todos los roles** y los usa **segun su nombre**.',
         '',
-        '• **Renombrar** → añade el prefijo oficial (`XX ●┇`) sin crear roles nuevos',
-        '• **Crear** → solo faltantes reales',
-        '• **Organizar** → cada rol en su lugar de la jerarquia',
+        '**Aplicar prefijos** no borra ni recrea nada:',
+        'solo pone `XX ●┇` delante del nombre que ya tenia el rol.',
         '',
-        'Los miembros y permisos de cada rol se conservan.',
+        'Miembros, permisos y color se conservan.',
+        '**Organizar** los coloca en su lugar de la jerarquia.',
       ].join('\n'),
       footer: 'Administracion · Fundacion Aegis-Meridian',
     });
