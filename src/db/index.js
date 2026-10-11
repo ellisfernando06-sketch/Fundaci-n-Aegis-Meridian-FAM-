@@ -7,14 +7,38 @@ const { SITIOS_DEFAULT, CLASES_CONTENCION_DEFAULT } = require('../data/organigra
 
 let db = null;
 
+function resolverRutaDb() {
+  const preferida = process.env.DATABASE_PATH || path.join(process.cwd(), 'data', 'aegis.db');
+  const candidatos = [
+    preferida,
+    path.join('/tmp', 'aegis.db'),
+    path.join(process.cwd(), 'aegis.db'),
+  ];
+
+  for (const dbPath of candidatos) {
+    try {
+      const dir = path.dirname(dbPath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      // Probar escritura
+      const testFile = path.join(dir, '.aegis_write_test');
+      fs.writeFileSync(testFile, 'ok');
+      fs.unlinkSync(testFile);
+      return dbPath;
+    } catch (err) {
+      console.warn('[AEGIS] No se pudo usar', dbPath, '→', err.message);
+    }
+  }
+
+  throw new Error('No hay ninguna ruta escribible para la base de datos');
+}
+
 function getDb() {
   if (db) return db;
 
-  const dbPath = process.env.DATABASE_PATH || path.join(process.cwd(), 'data', 'aegis.db');
-  const dir = path.dirname(dbPath);
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
+  const dbPath = resolverRutaDb();
+  console.log('[AEGIS] Abriendo base de datos en', dbPath);
 
   db = new Database(dbPath);
   db.pragma('journal_mode = WAL');
@@ -49,6 +73,7 @@ function seedInicial() {
       }
     });
     tx(LLAVES_INICIALES);
+    console.log('[AEGIS] Seed de llaves completado');
   }
 
   const countConfig = db.prepare('SELECT COUNT(*) AS c FROM config').get().c;
@@ -67,9 +92,6 @@ function seedInicial() {
   }
 }
 
-/**
- * Genera el siguiente identificador autoincremental (PER-0001, FAM-0001, etc.)
- */
 function nextId(tipo) {
   const row = db.prepare('SELECT valor FROM contadores WHERE tipo = ?').get(tipo);
   const nuevo = (row ? row.valor : 0) + 1;
