@@ -13,7 +13,12 @@ const {
   getJerarquiaCompleta,
   nombreBaseRol,
 } = require('../data/organigrama');
-const { normalizarNombre, truncar } = require('../utils/helpers');
+const {
+  normalizarNombre,
+  coberturaTokens,
+  similitudDice,
+  truncar,
+} = require('../utils/helpers');
 
 const prefix = 'config_roles';
 
@@ -41,80 +46,127 @@ function guardarMapa(cargoKey, roleId, nombreRol, origen) {
 
 function debeIgnorar(nombre) {
   const n = normalizarNombre(nombre);
-  return ROLES_IGNORAR.some((x) => n === normalizarNombre(x) || n.includes(normalizarNombre(x)));
+  if (!n) return true;
+  return ROLES_IGNORAR.some((x) => {
+    const nx = normalizarNombre(x);
+    return n === nx || n === `bot oficial` || n.startsWith('bot ');
+  });
 }
 
-/** Deteccion SOLO por nombre (sin exigir prefijo) */
-function coincidePorNombre(rolDiscord, item) {
-  const baseRol = normalizarNombre(nombreBaseRol(rolDiscord.name));
-  const nomRol = normalizarNombre(rolDiscord.name);
-  const baseEsp = normalizarNombre(item.nombre || nombreBaseRol(item.nombreRol || ''));
-
-  if (!baseEsp) return false;
-  if (baseRol === baseEsp || nomRol === baseEsp) return true;
-
-  if (item.aliases) {
-    for (const a of item.aliases) {
-      const na = normalizarNombre(a);
-      if (baseRol === na || nomRol === na) return true;
-    }
-  }
-  return false;
+/** Textos candidatos del item (nombre + aliases) */
+function textosEsperados(item) {
+  const lista = [];
+  if (item.nombre) lista.push(item.nombre);
+  if (item.nombreRol) lista.push(nombreBaseRol(item.nombreRol));
+  if (item.aliases) lista.push(...item.aliases);
+  return [...new Set(lista.map((t) => normalizarNombre(t)).filter(Boolean))];
 }
 
 /**
- * Solo aplica / corrige el prefijo.
- * Conserva el nombre legible tal como esta en el servidor.
+ * Puntuacion 0..1 de que un rol Discord sea este item del organigrama.
+ * Solo por nombre (flexible).
  */
+function scoreMatch(rolDiscord, item) {
+  const baseRol = normalizarNombre(nombreBaseRol(rolDiscord.name));
+  const nomRol = normalizarNombre(rolDiscord.name);
+  if (!baseRol && !nomRol) return 0;
+
+  const esperados = textosEsperados(item);
+  if (!esperados.length) return 0;
+
+  let best = 0;
+
+  for (const esp of esperados) {
+    // Exacto
+    if (baseRol === esp || nomRol === esp) return 1;
+
+    // Uno contiene al otro (min 6 chars para evitar falsos)
+    if (esp.length >= 6) {
+      if (baseRol.includes(esp) || nomRol.includes(esp)) best = Math.max(best, 0.95);
+      if (esp.includes(baseRol) && baseRol.length >= 6) best = Math.max(best, 0.92);
+    }
+
+    // Cobertura de tokens (ej. "cofundador calidad cumplimiento")
+    const covBase = coberturaTokens(esp, baseRol);
+    const covNom = coberturaTokens(esp, nomRol);
+    const cov = Math.max(covBase, covNom);
+    if (cov >= 0.8) best = Math.max(best, 0.85 + cov * 0.1);
+    else if (cov >= 0.6) best = Math.max(best, 0.72 + cov * 0.1);
+
+    // Similitud de texto
+    const dice = Math.max(similitudDice(baseRol, esp), similitudDice(nomRol, esp));
+    if (dice >= 0.72) best = Math.max(best, dice);
+  }
+
+  return best;
+}
+
+/** Umbral minimo para aceptar un match */
+const UMBRAL = 0.72;
+
 function nombreConPrefijo(rolDiscord, item) {
-  // Separadores y permisos: nombre oficial completo
   if (item.tipo === 'separador' || item.tipo === 'permiso' || !item.prefijo) {
     return item.nombreRol || item.nombre;
   }
 
-  // Conservar el texto del rol (sin prefijo viejo)
   let base = nombreBaseRol(rolDiscord.name);
   if (!base || base.length < 2) {
     base = item.nombre || nombreBaseRol(item.nombreRol || '');
   }
 
-  if (item.emoji) {
-    return `${item.emoji} ${item.prefijo} ●┇${base}`;
-  }
+  if (item.emoji) return `${item.emoji} ${item.prefijo} ●┇${base}`;
   return `${item.prefijo} ●┇${base}`;
 }
 
+/**
+ * Escaneo en 2 pasadas:
+ * 1) matches fuertes (>= 0.92)
+ * 2) matches flexibles (>= UMBRAL) sin reutilizar roles
+ */
 function escanearServidor(guild) {
   const roles = [...guild.roles.cache.values()].filter(
     (r) => r.id !== guild.id && !r.managed && !debeIgnorar(r.name)
   );
   const catalogo = getJerarquiaCompleta();
+  const usados = new Set();
+  const asignado = new Map(); // itemKey -> { item, rol, score }
+
+  // Matriz de scores
+  const scores = [];
+  for (const item of catalogo) {
+    for (const rol of roles) {
+      const s = scoreMatch(rol, item);
+      if (s >= UMBRAL) {
+        scores.push({ item, rol, score: s });
+      }
+    }
+  }
+
+  // Ordenar por score descendente (mejores primero)
+  scores.sort((a, b) => b.score - a.score);
+
+  for (const { item, rol, score } of scores) {
+    if (asignado.has(item.key)) continue;
+    if (usados.has(rol.id)) continue;
+    asignado.set(item.key, { item, rol, score });
+    usados.add(rol.id);
+  }
+
   const detectados = [];
   const aRenombrar = [];
   const faltantes = [];
-  const usados = new Set();
 
   for (const item of catalogo) {
-    let match = null;
-    for (const rol of roles) {
-      if (usados.has(rol.id)) continue;
-      if (coincidePorNombre(rol, item)) {
-        match = rol;
-        break;
-      }
-    }
-
-    if (match) {
-      const destino = nombreConPrefijo(match, item);
-      detectados.push({ item, rol: match });
-      usados.add(match.id);
-      guardarMapa(item.key, match.id, match.name, 'existente');
-
-      if (match.name !== destino) {
+    const hit = asignado.get(item.key);
+    if (hit) {
+      detectados.push({ item: hit.item, rol: hit.rol, score: hit.score });
+      guardarMapa(item.key, hit.rol.id, hit.rol.name, 'existente');
+      const destino = nombreConPrefijo(hit.rol, item);
+      if (hit.rol.name !== destino) {
         aRenombrar.push({
           item,
-          rol: match,
-          nombreActual: match.name,
+          rol: hit.rol,
+          nombreActual: hit.rol.name,
           nombreDestino: destino,
         });
       }
@@ -178,7 +230,7 @@ async function analizar(interaction) {
       { name: 'Faltantes', value: String(faltantes.length), inline: true },
       { name: 'Otros', value: String(noUsados.length), inline: true },
     ],
-    footer: 'Se leen todos · se usan por nombre · solo se cambia el prefijo',
+    footer: 'Deteccion flexible por nombre · cofundadores y directores incluidos',
   }));
 
   if (detectados.length) {
@@ -186,8 +238,11 @@ async function analizar(interaction) {
       color: COLORES.medicina,
       titulo: `Roles detectados (${detectados.length})`,
       descripcion: truncar(
-        detectados.slice(0, 18).map((d) => `· **${d.rol.name}** → \`${d.item.key}\``).join('\n') +
-        (detectados.length > 18 ? `\n… +${detectados.length - 18}` : '')
+        detectados
+          .slice(0, 25)
+          .map((d) => `· **${d.rol.name}** → \`${d.item.key}\` (${Math.round((d.score || 1) * 100)}%)`)
+          .join('\n') +
+        (detectados.length > 25 ? `\n… +${detectados.length - 25}` : '')
       ),
       footer: 'Se reutilizan · no se borran',
       timestamp: false,
@@ -199,13 +254,12 @@ async function analizar(interaction) {
       color: 0xe8b923,
       titulo: `Prefijo por aplicar (${aRenombrar.length})`,
       descripcion: truncar(
-        aRenombrar.slice(0, 18).map((r) =>
+        aRenombrar.slice(0, 20).map((r) =>
           `**${r.nombreActual}** → \`${r.nombreDestino}\``
         ).join('\n') +
-        (aRenombrar.length > 18 ? `\n… +${aRenombrar.length - 18}` : '') +
-        '\n\nSolo cambia el prefijo. El nombre del rol se mantiene.'
+        (aRenombrar.length > 20 ? `\n… +${aRenombrar.length - 20}` : '')
       ),
-      footer: 'Aplicar prefijos oficiales',
+      footer: 'Solo cambia el prefijo',
       timestamp: false,
     }));
   }
@@ -215,8 +269,8 @@ async function analizar(interaction) {
       color: COLORES.denegado,
       titulo: `Faltantes (${faltantes.length})`,
       descripcion: truncar(
-        faltantes.slice(0, 18).map((f) => `· ${f.nombreRol || f.nombre}`).join('\n') +
-        (faltantes.length > 18 ? `\n… +${faltantes.length - 18}` : '')
+        faltantes.slice(0, 20).map((f) => `· ${f.nombreRol || f.nombre}`).join('\n') +
+        (faltantes.length > 20 ? `\n… +${faltantes.length - 20}` : '')
       ),
       footer: 'Crear roles faltantes',
       timestamp: false,
@@ -226,10 +280,10 @@ async function analizar(interaction) {
   if (noUsados.length) {
     embeds.push(embedBase({
       color: COLORES.neutral,
-      titulo: 'Otros roles (intactos)',
+      titulo: `Otros roles (${noUsados.length})`,
       descripcion: truncar(
-        noUsados.slice(0, 12).map((r) => `· ${r.name}`).join('\n') +
-        (noUsados.length > 12 ? `\n… +${noUsados.length - 12}` : '')
+        noUsados.slice(0, 15).map((r) => `· ${r.name}`).join('\n') +
+        (noUsados.length > 15 ? `\n… +${noUsados.length - 15}` : '')
       ),
       footer: 'No se tocan',
       timestamp: false,
@@ -253,7 +307,7 @@ async function onRenombrarConfirmar(interaction) {
       embeds: [embedBase({
         color: COLORES.medicina,
         titulo: 'Aplicar prefijos',
-        descripcion: 'No hay nada que cambiar. Los roles detectados ya tienen el prefijo correcto.',
+        descripcion: 'No hay nada que cambiar. Los detectados ya tienen el prefijo correcto.',
         footer: 'Administracion',
       })],
       components: [],
@@ -271,14 +325,7 @@ async function onRenombrarConfirmar(interaction) {
     embeds: [embedBase({
       color: COLORES.neutral,
       titulo: `Aplicar prefijo a ${aRenombrar.length} roles`,
-      descripcion: [
-        'Se cambia **solo el prefijo**.',
-        'El nombre que ya tenia el rol se conserva.',
-        'Mismo rol, mismos miembros, mismos permisos.',
-        '',
-        preview,
-        aRenombrar.length > 20 ? `… +${aRenombrar.length - 20}` : '',
-      ].filter(Boolean).join('\n'),
+      descripcion: `Solo el prefijo. Nombre, miembros y permisos se conservan.\n\n${preview}${aRenombrar.length > 20 ? `\n… +${aRenombrar.length - 20}` : ''}`,
       footer: 'Confirmacion',
     })],
     components: [new ActionRowBuilder().addComponents(
@@ -313,12 +360,8 @@ async function onRenombrarEjecutar(interaction) {
   for (const r of aRenombrar) {
     try {
       const rol = guild.roles.cache.get(r.rol.id);
-      if (!rol || !rol.editable) {
-        fallos.push(r.nombreActual);
-        continue;
-      }
+      if (!rol || !rol.editable) { fallos.push(r.nombreActual); continue; }
       if (rol.name === r.nombreDestino) continue;
-
       await rol.setName(r.nombreDestino, `Aegis · prefijo · ${interaction.user.tag}`);
       guardarMapa(r.item.key, rol.id, r.nombreDestino, 'existente');
       hechos++;
@@ -330,12 +373,11 @@ async function onRenombrarEjecutar(interaction) {
   }
 
   auditoria.registrar(interaction.user.id, 'CONFIG_ROLES.PREFIJO', { hechos, fallos: fallos.length });
-
   await interaction.editReply({
     embeds: [embedBase({
       color: COLORES.medicina,
       titulo: 'Prefijos aplicados',
-      descripcion: `Actualizados: **${hechos}**\nRoles conservados.${fallos.length ? `\nSin cambiar: ${fallos.length} (sube el rol del bot)` : ''}\n\nSiguiente paso: **Organizar jerarquia**.`,
+      descripcion: `Actualizados: **${hechos}**${fallos.length ? `\nSin cambiar: ${fallos.length}` : ''}\n\nSiguiente: **Organizar jerarquia**.`,
       footer: 'Administracion',
     })],
     components: [],
@@ -352,7 +394,7 @@ async function onCrearConfirmar(interaction) {
       embeds: [embedBase({
         color: COLORES.medicina,
         titulo: 'Crear faltantes',
-        descripcion: 'No hay faltantes. Todo lo del organigrama ya existe por nombre.',
+        descripcion: 'No hay faltantes. Todo el organigrama ya existe por nombre.',
         footer: 'Administracion',
       })],
       components: [],
@@ -398,7 +440,6 @@ async function onCrearEjecutar(interaction) {
 
   let creados = 0;
   const errores = [];
-
   for (const item of faltantes) {
     try {
       const nombre = item.nombreRol || item.nombre;
@@ -424,7 +465,7 @@ async function onCrearEjecutar(interaction) {
     embeds: [embedBase({
       color: COLORES.medicina,
       titulo: 'Roles creados',
-      descripcion: `Creados: **${creados}**${errores.length ? `\nErrores: ${errores.length}` : ''}\n\nUsa **Organizar jerarquia**.`,
+      descripcion: `Creados: **${creados}**${errores.length ? `\nErrores: ${errores.length}` : ''}`,
       footer: 'Administracion',
     })],
     components: [],
@@ -436,17 +477,7 @@ async function onOrganizarConfirmar(interaction) {
     embeds: [embedBase({
       color: COLORES.neutral,
       titulo: 'Organizar jerarquia',
-      descripcion: [
-        'Coloca cada rol detectado en su seccion:',
-        '',
-        'Staff → Soporte → Cupula → Direcciones',
-        '(Gerente SI encima de Director General)',
-        '→ SI → Seguridad → FTM / ERR',
-        '→ Medicina → Investigacion → Inteligencia',
-        '→ Clase D → Insurgencia → Permisos',
-        '',
-        'Solo mueve roles del organigrama. El resto no se toca.',
-      ].join('\n'),
+      descripcion: 'Coloca cada rol detectado en su seccion (Gerente SI encima de Director General). Solo mueve roles del organigrama.',
       footer: 'Confirmacion',
     })],
     components: [new ActionRowBuilder().addComponents(
@@ -514,7 +545,6 @@ async function onEliminarConfirmar(interaction) {
   const db = getDb();
   asegurarColumnaOrigen();
   const delBot = db.prepare("SELECT * FROM roles_map WHERE origen = 'bot'").all();
-
   const lista = [];
   for (const row of delBot) {
     const rol = guild.roles.cache.get(row.role_id);
@@ -526,7 +556,7 @@ async function onEliminarConfirmar(interaction) {
       embeds: [embedBase({
         color: COLORES.neutral,
         titulo: 'Eliminar roles del bot',
-        descripcion: 'No hay roles creados por el bot. Los que solo recibieron prefijo no se borran.',
+        descripcion: 'No hay roles creados por el bot.',
         footer: 'Administracion',
       })],
       components: [],
@@ -541,7 +571,7 @@ async function onEliminarConfirmar(interaction) {
     embeds: [embedBase({
       color: COLORES.denegado,
       titulo: `Eliminar ${lista.length} roles del bot`,
-      descripcion: `Solo los que el bot creo.\n\n${preview}${lista.length > 25 ? `\n… +${lista.length - 25}` : ''}`,
+      descripcion: `${preview}${lista.length > 25 ? `\n… +${lista.length - 25}` : ''}`,
       footer: 'Confirmacion',
     })],
     components: [new ActionRowBuilder().addComponents(
