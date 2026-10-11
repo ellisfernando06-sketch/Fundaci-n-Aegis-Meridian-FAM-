@@ -10,7 +10,7 @@ const { embedBase, COLORES } = require('../utils/plantillas');
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('config_roles')
-    .setDescription('Análisis y sincronización de roles del servidor')
+    .setDescription('Análisis, creación y organización de roles del organigrama')
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 
   async execute(interaction) {
@@ -25,35 +25,29 @@ module.exports = {
           emoji: '🔍',
         },
         {
-          label: 'Crear solo faltantes',
+          label: 'Crear roles faltantes',
           value: 'crear',
-          description: 'Crea con el mismo estilo de los roles ya detectados',
+          description: 'Formato XX ●┇Nombre · no toca los que ya están',
           emoji: '🛠️',
         },
         {
-          label: 'Eliminar roles creados por el bot',
+          label: 'Organizar jerarquía',
+          value: 'organizar',
+          description: 'Ordena por sección · SI encima de Director General',
+          emoji: '📐',
+        },
+        {
+          label: 'Eliminar roles Aegis del bot',
           value: 'eliminar_bot',
-          description: 'Borra solo los que creó Aegis; conserva los originales',
+          description: 'Borra formato organigrama creados por el bot',
           emoji: '🗑️',
-        },
-        {
-          label: 'Vincular roles existentes',
-          value: 'vincular',
-          description: 'Asocia roles del servidor al organigrama',
-          emoji: '🔗',
-        },
-        {
-          label: 'Sincronizar colores',
-          value: 'sincronizar',
-          description: 'Ajusta color de roles vinculados',
-          emoji: '🎨',
         },
       ]);
 
     const embed = embedBase({
       color: COLORES.neutral,
       titulo: '🧩 Configuración de roles',
-      descripcion: 'Los roles que ya estaban en el servidor se conservan. El bot solo crea los faltantes y puede eliminar únicamente los que él generó.',
+      descripcion: 'Formato oficial: **XX ●┇Nombre** (ej. `MED ●┇Director Médico`).\nDetecta por nombre los roles que ya tienes, crea solo faltantes y organiza con separadores.',
       footer: 'Administración',
     });
 
