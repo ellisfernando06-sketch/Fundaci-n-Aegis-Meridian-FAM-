@@ -11,6 +11,7 @@ const { embedBase, COLORES } = require('../utils/plantillas');
 const {
   ROLES_IGNORAR,
   getJerarquiaCompleta,
+  getOrganigramaTexto,
   nombreBaseRol,
 } = require('../data/organigrama');
 const { normalizarNombre, truncar } = require('../utils/helpers');
@@ -121,6 +122,7 @@ async function handle(interaction, accion, args) {
 
 async function onMenu(interaction) {
   const opcion = interaction.values[0];
+  if (opcion === 'organigrama') return verOrganigrama(interaction);
   if (opcion === 'analizar') return analizar(interaction);
   if (opcion === 'crear') return onCrearConfirmar(interaction);
   if (opcion === 'organizar') return onOrganizarConfirmar(interaction);
@@ -136,6 +138,32 @@ async function onMenu(interaction) {
       components: [],
     }).catch(() => {});
   }
+}
+
+async function verOrganigrama(interaction) {
+  await interaction.deferUpdate();
+  const texto = getOrganigramaTexto();
+  const chunks = [];
+  let actual = '';
+  for (const linea of texto.split('\n')) {
+    if ((actual + '\n' + linea).length > 3800) {
+      chunks.push(actual);
+      actual = linea;
+    } else {
+      actual = actual ? actual + '\n' + linea : linea;
+    }
+  }
+  if (actual) chunks.push(actual);
+
+  const embeds = chunks.slice(0, 8).map((desc, i) => embedBase({
+    color: COLORES.neutral,
+    titulo: i === 0 ? 'Organigrama · Fundacion Aegis-Meridian' : `Organigrama (cont. ${i + 1})`,
+    descripcion: desc,
+    footer: 'Custodes Veritatis',
+    timestamp: i === 0,
+  }));
+
+  await interaction.editReply({ embeds, components: [] });
 }
 
 async function analizar(interaction) {
@@ -218,7 +246,6 @@ async function onCrearConfirmar(interaction) {
 }
 
 async function onCrearEjecutar(interaction) {
-  // Quitar boton al confirmar
   await interaction.update({
     embeds: [embedBase({
       color: COLORES.neutral,
