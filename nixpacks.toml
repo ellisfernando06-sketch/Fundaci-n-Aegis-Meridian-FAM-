@@ -1,8 +1,10 @@
 [phases.setup]
-nixPkgs = ["nodejs_20", "python3", "gcc", "gnumake"]
+nixPkgs = ["nodejs_20", "python3", "gcc", "gnumake", "binutils"]
 
 [phases.install]
-cmds = ["npm ci || npm install"]
+cmds = [
+  "npm install --build-from-source=better-sqlite3 || npm install"
+]
 
 [start]
 cmd = "node src/index.js"
