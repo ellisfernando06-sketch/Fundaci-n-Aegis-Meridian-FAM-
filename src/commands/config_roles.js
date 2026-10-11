@@ -21,39 +21,39 @@ module.exports = {
         {
           label: 'Analizar roles del servidor',
           value: 'analizar',
-          description: 'Modo solo lectura · detecta faltantes y coincidencias',
+          description: 'Detecta existentes, parciales y faltantes',
           emoji: '🔍',
         },
         {
-          label: 'Crear roles faltantes',
+          label: 'Crear solo faltantes',
           value: 'crear',
-          description: 'Crea roles del organigrama que no existan',
+          description: 'Crea con el mismo estilo de los roles ya detectados',
           emoji: '🛠️',
+        },
+        {
+          label: 'Eliminar roles creados por el bot',
+          value: 'eliminar_bot',
+          description: 'Borra solo los que creó Aegis; conserva los originales',
+          emoji: '🗑️',
         },
         {
           label: 'Vincular roles existentes',
           value: 'vincular',
-          description: 'Asocia roles del servidor a cargos del organigrama',
+          description: 'Asocia roles del servidor al organigrama',
           emoji: '🔗',
         },
         {
-          label: 'Sincronizar colores y orden',
+          label: 'Sincronizar colores',
           value: 'sincronizar',
-          description: 'Ajusta color y posición de roles vinculados',
+          description: 'Ajusta color de roles vinculados',
           emoji: '🎨',
-        },
-        {
-          label: 'Exportar informe',
-          value: 'exportar',
-          description: 'Genera un informe completo del estado de roles',
-          emoji: '📄',
         },
       ]);
 
     const embed = embedBase({
       color: COLORES.neutral,
       titulo: '🧩 Configuración de roles',
-      descripcion: 'Selecciona una acción. El análisis no modifica nada del servidor.',
+      descripcion: 'Los roles que ya estaban en el servidor se conservan. El bot solo crea los faltantes y puede eliminar únicamente los que él generó.',
       footer: 'Administración',
     });
 
