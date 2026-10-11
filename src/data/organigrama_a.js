@@ -230,7 +230,6 @@ const ORGANIGRAMA = {
     color: '#378ADD',
     nombre: 'Faccion de Seguridad',
     cargos: [
-      { key: 'SEG.COMANDANTES', nombre: 'Comandantes de Facciones de Seguridad', orden: 121, nivelMando: 2, aliases: ['comandantes de facciones de seguridad', 'comandante de faccion de seguridad', 'comandantes de faccion'] },
       { key: 'SEG.SUB_GUARDIA', nombre: 'Subcomandante de Guardia', orden: 122, nivelMando: 3, aliases: ['sub comandante de guardia', 'subcomandante de guardia', 'subcomandante guardia'] },
       { key: 'SEG.SUB_RR', nombre: 'Subcomandante de Respuesta Rapida', orden: 123, nivelMando: 3, aliases: ['subcomandante de respuesta rapida', 'subcomandante de respuesta rápida', 'sub comandante de respuesta rapida', 'subcomandante err', 'subcomandante rr'] },
       { key: 'SEG.SUB_FTM', nombre: 'Subcomandante de Fuerza de Trabajo Movil', orden: 124, nivelMando: 3, aliases: ['subcomandante de fuerza de trabajo mobil', 'subcomandante de fuerza de trabajo móvil', 'sub comandante de fuerza de trabajo mobil', 'subcomandante ftm'] },
