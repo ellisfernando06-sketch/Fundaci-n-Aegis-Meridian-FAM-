@@ -1,13 +1,10 @@
 /**
- * Organigrama oficial · Fundación Aegis-Meridian
+ * Organigrama oficial · Fundacion Aegis-Meridian
  * Formato: "XX ●┇Nombre"
- * Emoji SOLO en Fundador y Cofundadores. El resto sin emoji.
+ * Emoji SOLO en Fundador y Cofundadores.
  */
 
-/** Formato base sin emoji */
 const FORMATO = (prefijo, nombre) => `${prefijo} ●┇${nombre}`;
-
-/** Formato con emoji (solo fundadores / cofundadores) */
 const FORMATO_EMOJI = (emoji, prefijo, nombre) => `${emoji} ${prefijo} ●┇${nombre}`;
 
 const SEPARADORES = [
@@ -37,7 +34,7 @@ const ORGANIGRAMA = {
         orden: 11,
         nivelMando: 1,
         emoji: '👑',
-        aliases: ['fundador'],
+        aliases: ['fundador', 'founder', 'dueño', 'dueno'],
       },
       {
         key: 'ST.CO_CALIDAD',
@@ -49,6 +46,11 @@ const ORGANIGRAMA = {
           'cofundador de calidad y cumplimiento',
           'co-fundador de cumplimiento y calidad',
           'co fundador de calidad y cumplimiento',
+          'cofundador de calidad',
+          'cofundador calidad',
+          'co fundador calidad',
+          'calidad y cumplimiento',
+          'cumplimiento y calidad',
         ],
       },
       {
@@ -61,6 +63,11 @@ const ORGANIGRAMA = {
           'cofundador de estrategia y estatuto',
           'co-fundador de estatutos y estrategia',
           'co fundador de estrategia y estatuto',
+          'cofundador de estrategia',
+          'cofundador estrategia',
+          'estrategia y estatuto',
+          'estatutos y estrategia',
+          'cofundador de estatutos',
         ],
       },
       {
@@ -68,21 +75,21 @@ const ORGANIGRAMA = {
         nombre: 'Administrador en Jefe',
         orden: 14,
         nivelMando: 1,
-        aliases: ['administrador en jefe', 'admin en jefe'],
+        aliases: ['administrador en jefe', 'admin en jefe', 'admin jefe', 'administrador jefe'],
       },
       {
         key: 'ST.ADMIN_SENIOR',
         nombre: 'Administrador Senior',
         orden: 15,
         nivelMando: 1,
-        aliases: ['administrador senior', 'admin senior', 'administrador senior'],
+        aliases: ['administrador senior', 'admin senior', 'administrador senior', 'admin sr'],
       },
       {
         key: 'ST.ADMIN_PRUEBA',
         nombre: 'Administrador en Prueba',
         orden: 16,
         nivelMando: 1,
-        aliases: ['administrador en prueba', 'admin en prueba'],
+        aliases: ['administrador en prueba', 'admin en prueba', 'admin prueba', 'administrador prueba'],
       },
     ],
   },
@@ -91,8 +98,8 @@ const ORGANIGRAMA = {
     color: '#3BA55D',
     nombre: 'Soporte',
     cargos: [
-      { key: 'SP.TECNICO', nombre: 'Soporte Tecnico', orden: 41, nivelMando: 1, aliases: ['soporte tecnico', 'soporte técnico'] },
-      { key: 'SP.TECNICO_PRUEBA', nombre: 'Soporte Tecnico en Prueba', orden: 42, nivelMando: 1, aliases: ['soporte tecnico en prueba', 'soporte técnico en prueba'] },
+      { key: 'SP.TECNICO', nombre: 'Soporte Tecnico', orden: 41, nivelMando: 1, aliases: ['soporte tecnico', 'soporte técnico', 'soporte', 'tech support'] },
+      { key: 'SP.TECNICO_PRUEBA', nombre: 'Soporte Tecnico en Prueba', orden: 42, nivelMando: 1, aliases: ['soporte tecnico en prueba', 'soporte técnico en prueba', 'soporte en prueba'] },
     ],
   },
   cupula: {
@@ -100,8 +107,8 @@ const ORGANIGRAMA = {
     color: '#7F77DD',
     nombre: 'Cupula',
     cargos: [
-      { key: 'CUP.PRESIDENTE', nombre: 'Presidente del Consejo', orden: 61, nivelMando: 1, aliases: ['presidente del consejo'] },
-      { key: 'CUP.CONSEJO', nombre: 'Consejo Directivo', orden: 62, nivelMando: 1, aliases: ['consejo directivo', 'junta de directores'] },
+      { key: 'CUP.PRESIDENTE', nombre: 'Presidente del Consejo', orden: 61, nivelMando: 1, aliases: ['presidente del consejo', 'presidente'] },
+      { key: 'CUP.CONSEJO', nombre: 'Consejo Directivo', orden: 62, nivelMando: 1, aliases: ['consejo directivo', 'junta de directores', 'consejo'] },
     ],
   },
   direcciones: {
@@ -109,12 +116,47 @@ const ORGANIGRAMA = {
     color: '#5865F2',
     nombre: 'Direcciones',
     cargos: [
-      { key: 'SI.GERENTE', nombre: 'Gerente de Seguridad Interna', orden: 81, nivelMando: 2, aliases: ['gerente de seguridad interna', 'gerente se seguridad interna'] },
-      { key: 'DIR.GENERAL', nombre: 'Director General', orden: 82, nivelMando: 1, aliases: ['director general'] },
-      { key: 'INT.GERENTE', nombre: 'Gerente de Inteligencia', orden: 83, nivelMando: 2, aliases: ['gerente de inteligencia'] },
-      { key: 'SEG.COMANDANTE', nombre: 'Comandante de Seguridad', orden: 84, nivelMando: 2, aliases: ['comandante de seguridad', 'comandante'] },
-      { key: 'MED.DIRECTOR', nombre: 'Director Medico', orden: 85, nivelMando: 2, aliases: ['director medico', 'director médico'] },
-      { key: 'INV.DIRECTOR', nombre: 'Director de Investigacion Cientifica', orden: 86, nivelMando: 2, aliases: ['director de investigacion cientifica', 'director de investigación científica', 'director de investigacion'] },
+      {
+        key: 'SI.GERENTE',
+        nombre: 'Gerente de Seguridad Interna',
+        orden: 81,
+        nivelMando: 2,
+        aliases: [
+          'gerente de seguridad interna',
+          'gerente se seguridad interna',
+          'gerente si',
+          'gerente de si',
+        ],
+      },
+      { key: 'DIR.GENERAL', nombre: 'Director General', orden: 82, nivelMando: 1, aliases: ['director general', 'dir general', 'dg'] },
+      { key: 'INT.GERENTE', nombre: 'Gerente de Inteligencia', orden: 83, nivelMando: 2, aliases: ['gerente de inteligencia', 'gerente inteligencia'] },
+      {
+        key: 'SEG.COMANDANTE',
+        nombre: 'Comandante de Seguridad',
+        orden: 84,
+        nivelMando: 2,
+        aliases: ['comandante de seguridad', 'comandante seguridad'],
+      },
+      {
+        key: 'MED.DIRECTOR',
+        nombre: 'Director Medico',
+        orden: 85,
+        nivelMando: 2,
+        aliases: ['director medico', 'director médico', 'dir medico', 'director de medicina'],
+      },
+      {
+        key: 'INV.DIRECTOR',
+        nombre: 'Director de Investigacion Cientifica',
+        orden: 86,
+        nivelMando: 2,
+        aliases: [
+          'director de investigacion cientifica',
+          'director de investigación científica',
+          'director de investigacion',
+          'director investigacion',
+          'director de investigación',
+        ],
+      },
     ],
   },
   seguridad_interna: {
@@ -122,12 +164,12 @@ const ORGANIGRAMA = {
     color: '#7F77DD',
     nombre: 'Seguridad Interna',
     cargos: [
-      { key: 'SI.JEFE', nombre: 'Jefe de Seguridad Interna', orden: 111, nivelMando: 3, aliases: ['jefe de seguridad interna'] },
-      { key: 'SI.SUPERVISOR', nombre: 'Supervisor de Seguridad Interna', orden: 112, nivelMando: 3, aliases: ['supervisor de seguridad interna', 'supervisor'] },
-      { key: 'SI.INTERROGATORIO', nombre: 'Encargado de Interrogatorio de Seguridad Interna', orden: 113, nivelMando: 3, aliases: ['encargado de interrogatorio de seguridad interna', 'encargado de interrogatorio'] },
-      { key: 'SI.AGENTE_CAMPO', nombre: 'Agente de Campo de Seguridad Interna', orden: 114, nivelMando: 4, aliases: ['agente de campo de seguridad interna', 'agente de campo'] },
-      { key: 'SI.AGENTE', nombre: 'Agente de Seguridad Interna', orden: 115, nivelMando: 4, aliases: ['agente de seguridad interna'] },
-      { key: 'SI.INGRESO', nombre: 'Agente de Ingreso de Seguridad Interna', orden: 116, nivelMando: 4, aliases: ['agente de ingreso de seguridad interna', 'agente de ingreso'] },
+      { key: 'SI.JEFE', nombre: 'Jefe de Seguridad Interna', orden: 111, nivelMando: 3, aliases: ['jefe de seguridad interna', 'jefe si'] },
+      { key: 'SI.SUPERVISOR', nombre: 'Supervisor de Seguridad Interna', orden: 112, nivelMando: 3, aliases: ['supervisor de seguridad interna', 'supervisor si'] },
+      { key: 'SI.INTERROGATORIO', nombre: 'Encargado de Interrogatorio de Seguridad Interna', orden: 113, nivelMando: 3, aliases: ['encargado de interrogatorio de seguridad interna', 'encargado de interrogatorio', 'interrogatorio'] },
+      { key: 'SI.AGENTE_CAMPO', nombre: 'Agente de Campo de Seguridad Interna', orden: 114, nivelMando: 4, aliases: ['agente de campo de seguridad interna', 'agente de campo si'] },
+      { key: 'SI.AGENTE', nombre: 'Agente de Seguridad Interna', orden: 115, nivelMando: 4, aliases: ['agente de seguridad interna', 'agente si'] },
+      { key: 'SI.INGRESO', nombre: 'Agente de Ingreso de Seguridad Interna', orden: 116, nivelMando: 4, aliases: ['agente de ingreso de seguridad interna', 'agente de ingreso si', 'agente de ingreso'] },
     ],
   },
   seguridad: {
@@ -135,10 +177,10 @@ const ORGANIGRAMA = {
     color: '#378ADD',
     nombre: 'Faccion de Seguridad',
     cargos: [
-      { key: 'SEG.COMANDANTES', nombre: 'Comandantes de Facciones de Seguridad', orden: 161, nivelMando: 2, aliases: ['comandantes de facciones de seguridad', 'comandante de faccion de seguridad'] },
-      { key: 'SEG.SUB_GUARDIA', nombre: 'Subcomandante de Guardia', orden: 162, nivelMando: 3, aliases: ['sub comandante de guardia', 'subcomandante de guardia'] },
-      { key: 'SEG.SUB_RR', nombre: 'Subcomandante de Respuesta Rapida', orden: 163, nivelMando: 3, aliases: ['subcomandante de respuesta rapida', 'subcomandante de respuesta rápida', 'sub comandante de respuesta rapida'] },
-      { key: 'SEG.SUB_FTM', nombre: 'Subcomandante de Fuerza de Trabajo Movil', orden: 164, nivelMando: 3, aliases: ['subcomandante de fuerza de trabajo mobil', 'subcomandante de fuerza de trabajo móvil', 'sub comandante de fuerza de trabajo mobil'] },
+      { key: 'SEG.COMANDANTES', nombre: 'Comandantes de Facciones de Seguridad', orden: 161, nivelMando: 2, aliases: ['comandantes de facciones de seguridad', 'comandante de faccion de seguridad', 'comandantes de faccion'] },
+      { key: 'SEG.SUB_GUARDIA', nombre: 'Subcomandante de Guardia', orden: 162, nivelMando: 3, aliases: ['sub comandante de guardia', 'subcomandante de guardia', 'subcomandante guardia'] },
+      { key: 'SEG.SUB_RR', nombre: 'Subcomandante de Respuesta Rapida', orden: 163, nivelMando: 3, aliases: ['subcomandante de respuesta rapida', 'subcomandante de respuesta rápida', 'sub comandante de respuesta rapida', 'subcomandante err', 'subcomandante rr'] },
+      { key: 'SEG.SUB_FTM', nombre: 'Subcomandante de Fuerza de Trabajo Movil', orden: 164, nivelMando: 3, aliases: ['subcomandante de fuerza de trabajo mobil', 'subcomandante de fuerza de trabajo móvil', 'sub comandante de fuerza de trabajo mobil', 'subcomandante ftm'] },
       { key: 'SEG.CAPITAN', nombre: 'Capitan de Seguridad', orden: 165, nivelMando: 3, aliases: ['capitan de seguridad', 'capitán de seguridad', 'capitan'] },
       { key: 'SEG.TENIENTE', nombre: 'Teniente de Seguridad', orden: 166, nivelMando: 4, aliases: ['teniente de seguridad', 'teniente'] },
       { key: 'SEG.SARGENTO', nombre: 'Sargento de Seguridad', orden: 167, nivelMando: 4, aliases: ['sargento de seguridad', 'sargento'] },
@@ -152,12 +194,12 @@ const ORGANIGRAMA = {
     color: '#378ADD',
     nombre: 'Fuerza de Trabajo Movil',
     cargos: [
-      { key: 'FTM.JEFE', nombre: 'Jefe de Fuerza de Trabajo Movil', orden: 180, nivelMando: 2, aliases: ['jefe de fuerza de trabajo mobil', 'jefe de fuerza de tarea'] },
+      { key: 'FTM.JEFE', nombre: 'Jefe de Fuerza de Trabajo Movil', orden: 180, nivelMando: 2, aliases: ['jefe de fuerza de trabajo mobil', 'jefe de fuerza de tarea', 'jefe ftm'] },
       { key: 'FTM.TENIENTE', nombre: 'Teniente de FTM', orden: 181, nivelMando: 3, aliases: ['teniente de ftm', 'teniente de fuerza de tarea'] },
       { key: 'FTM.SARGENTO', nombre: 'Sargento de FTM', orden: 182, nivelMando: 3, aliases: ['sargento de ftm'] },
-      { key: 'FTM.OPERATIVO_ELITE', nombre: 'Operativo de Elite FTM', orden: 183, nivelMando: 3, aliases: ['operativo de elite', 'operativo de élite'] },
-      { key: 'FTM.OPERATIVO', nombre: 'Operativo FTM', orden: 184, nivelMando: 4, aliases: ['operativo ftm', 'operativo'] },
-      { key: 'FTM.RECLUTA', nombre: 'Recluta FTM', orden: 185, nivelMando: 4, aliases: ['recluta ftm', 'recluta'] },
+      { key: 'FTM.OPERATIVO_ELITE', nombre: 'Operativo de Elite FTM', orden: 183, nivelMando: 3, aliases: ['operativo de elite', 'operativo de élite', 'operativo elite ftm'] },
+      { key: 'FTM.OPERATIVO', nombre: 'Operativo FTM', orden: 184, nivelMando: 4, aliases: ['operativo ftm'] },
+      { key: 'FTM.RECLUTA', nombre: 'Recluta FTM', orden: 185, nivelMando: 4, aliases: ['recluta ftm'] },
     ],
   },
   err: {
@@ -166,8 +208,8 @@ const ORGANIGRAMA = {
     nombre: 'Equipo de Respuesta Rapida',
     cargos: [
       { key: 'ERR.JEFE', nombre: 'Jefe del ERR', orden: 190, nivelMando: 2, aliases: ['jefe del err', 'jefe err'] },
-      { key: 'ERR.SUBJEFE', nombre: 'Subjefe del ERR', orden: 191, nivelMando: 3, aliases: ['subjefe del err'] },
-      { key: 'ERR.LIDER_ESCUADRON', nombre: 'Lider de Escuadron ERR', orden: 192, nivelMando: 3, aliases: ['lider de escuadron', 'líder de escuadrón'] },
+      { key: 'ERR.SUBJEFE', nombre: 'Subjefe del ERR', orden: 191, nivelMando: 3, aliases: ['subjefe del err', 'subjefe err'] },
+      { key: 'ERR.LIDER_ESCUADRON', nombre: 'Lider de Escuadron ERR', orden: 192, nivelMando: 3, aliases: ['lider de escuadron', 'líder de escuadrón', 'lider de escuadron err'] },
       { key: 'ERR.OPERATIVO', nombre: 'Operativo ERR', orden: 193, nivelMando: 4, aliases: ['operativo err', 'operativo tactico'] },
       { key: 'ERR.RECLUTA', nombre: 'Recluta ERR', orden: 194, nivelMando: 4, aliases: ['recluta err'] },
     ],
@@ -183,7 +225,7 @@ const ORGANIGRAMA = {
       { key: 'MED.JEFE_RESIDENTES', nombre: 'Jefe de Residentes', orden: 224, nivelMando: 4, aliases: ['jefe de residentes'] },
       { key: 'MED.RESIDENTE_SENIOR', nombre: 'Residente Senior', orden: 225, nivelMando: 4, aliases: ['residente senior', 'residente sénior'] },
       { key: 'MED.RESIDENTE', nombre: 'Residente', orden: 226, nivelMando: 4, aliases: ['residente'] },
-      { key: 'MED.INTERNO', nombre: 'Interno de Medicina', orden: 227, nivelMando: 4, aliases: ['interno de medicina', 'interno'] },
+      { key: 'MED.INTERNO', nombre: 'Interno de Medicina', orden: 227, nivelMando: 4, aliases: ['interno de medicina'] },
     ],
   },
   investigacion: {
@@ -206,7 +248,7 @@ const ORGANIGRAMA = {
     cargos: [
       { key: 'INT.SUBGERENTE', nombre: 'Subgerente de Inteligencia', orden: 301, nivelMando: 3, aliases: ['subgerente de inteligencia'] },
       { key: 'INT.SUPERVISOR', nombre: 'Supervisor de Inteligencia', orden: 302, nivelMando: 3, aliases: ['supervisor de inteligencia'] },
-      { key: 'INT.AGENTE_SENIOR', nombre: 'Agente Senior de Inteligencia', orden: 303, nivelMando: 4, aliases: ['agente senior de inteligencia', 'agente sénior'] },
+      { key: 'INT.AGENTE_SENIOR', nombre: 'Agente Senior de Inteligencia', orden: 303, nivelMando: 4, aliases: ['agente senior de inteligencia', 'agente sénior de inteligencia'] },
       { key: 'INT.AGENTE_CAMPO', nombre: 'Agente de Campo de Inteligencia', orden: 304, nivelMando: 4, aliases: ['agente de campo de inteligencia'] },
       { key: 'INT.INGRESO', nombre: 'Agente de Ingreso de Inteligencia', orden: 305, nivelMando: 4, aliases: ['agente de ingreso de inteligencia'] },
     ],
@@ -242,7 +284,7 @@ const ORGANIGRAMA = {
 };
 
 const ROLES_PERMISOS = [
-  { key: 'PERM.N0', nombreRol: 'Nivel 0 · Publico', orden: 421, color: '#888780', aliases: ['nivel 0', 'nivel 0 publico', 'nivel 0 · publico'] },
+  { key: 'PERM.N0', nombreRol: 'Nivel 0 · Publico', orden: 421, color: '#888780', aliases: ['nivel 0', 'nivel 0 publico', 'nivel 0 · publico', 'nivel 0 publico'] },
   { key: 'PERM.N1', nombreRol: 'Nivel 1 · Confidencial', orden: 422, color: '#378ADD', aliases: ['nivel 1', 'nivel 1 confidencial'] },
   { key: 'PERM.N2', nombreRol: 'Nivel 2 · Restringido', orden: 423, color: '#378ADD', aliases: ['nivel 2', 'nivel 2 restringido'] },
   { key: 'PERM.N3', nombreRol: 'Nivel 3 · Secreto', orden: 424, color: '#BA7517', aliases: ['nivel 3', 'nivel 3 secreto'] },
@@ -283,10 +325,6 @@ const ALERTAS = [
   { codigo: 'Negro', color: '#1A1A1A', emoji: '⚫' },
 ];
 
-/**
- * Construye el nombre de rol Discord.
- * Solo Fundador / Cofundadores llevan emoji.
- */
 function formatoRol(prefijo, nombreCargo, emoji) {
   if (emoji) return FORMATO_EMOJI(emoji, prefijo, nombreCargo);
   return FORMATO(prefijo, nombreCargo);
@@ -312,15 +350,9 @@ function getTodosCargos() {
 
 function getJerarquiaCompleta() {
   const items = [];
-  for (const sep of SEPARADORES) {
-    items.push({ ...sep, tipo: 'separador', nombreRol: sep.nombreRol });
-  }
-  for (const c of getTodosCargos()) {
-    items.push(c);
-  }
-  for (const p of ROLES_PERMISOS) {
-    items.push({ ...p, tipo: 'permiso', prefijo: null });
-  }
+  for (const sep of SEPARADORES) items.push({ ...sep, tipo: 'separador', nombreRol: sep.nombreRol });
+  for (const c of getTodosCargos()) items.push(c);
+  for (const p of ROLES_PERMISOS) items.push({ ...p, tipo: 'permiso', prefijo: null });
   items.sort((a, b) => (a.orden || 999) - (b.orden || 999));
   return items;
 }
@@ -337,16 +369,19 @@ function getPosicionCargo(key) {
   return -1;
 }
 
-/** Quita emoji inicial, prefijo XX ●┇ o [XX], separadores */
+/** Quita emoji, prefijos y separadores para comparar solo el nombre */
 function nombreBaseRol(nombreDiscord) {
   return String(nombreDiscord || '')
     .replace(/^[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]\s*/u, '')
     .replace(/^[A-Z0-9]{1,6}\s*●┇\s*/i, '')
+    .replace(/^[A-Z0-9]{1,6}\s*[|｜¦]\s*/i, '')
+    .replace(/^[A-Z0-9]{1,6}\s*[-–—:]\s*/i, '')
     .replace(/^\[[A-Z0-9]{1,6}\]\s*/i, '')
     .replace(/^—+\s*/u, '')
     .replace(/\s*—+$/u, '')
     .replace(/^━+\s*/u, '')
     .replace(/\s*━+$/u, '')
+    .replace(/^—+\s*/u, '')
     .trim();
 }
 
