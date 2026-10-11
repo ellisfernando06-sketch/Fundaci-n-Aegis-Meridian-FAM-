@@ -44,25 +44,44 @@ function debeIgnorar(nombre) {
   return ROLES_IGNORAR.some((x) => n === normalizarNombre(x) || n.includes(normalizarNombre(x)));
 }
 
-/**
- * Deteccion SOLO por nombre (base / aliases).
- * No exige el prefijo XX ●┇
- */
+/** Deteccion SOLO por nombre (sin exigir prefijo) */
 function coincidePorNombre(rolDiscord, item) {
   const baseRol = normalizarNombre(nombreBaseRol(rolDiscord.name));
   const nomRol = normalizarNombre(rolDiscord.name);
   const baseEsp = normalizarNombre(item.nombre || nombreBaseRol(item.nombreRol || ''));
 
   if (!baseEsp) return false;
-  if (baseRol === baseEsp) return true;
-  if (nomRol === baseEsp) return true;
+  if (baseRol === baseEsp || nomRol === baseEsp) return true;
 
   if (item.aliases) {
     for (const a of item.aliases) {
-      if (baseRol === normalizarNombre(a) || nomRol === normalizarNombre(a)) return true;
+      const na = normalizarNombre(a);
+      if (baseRol === na || nomRol === na) return true;
     }
   }
   return false;
+}
+
+/**
+ * Solo aplica / corrige el prefijo.
+ * Conserva el nombre legible tal como esta en el servidor.
+ */
+function nombreConPrefijo(rolDiscord, item) {
+  // Separadores y permisos: nombre oficial completo
+  if (item.tipo === 'separador' || item.tipo === 'permiso' || !item.prefijo) {
+    return item.nombreRol || item.nombre;
+  }
+
+  // Conservar el texto del rol (sin prefijo viejo)
+  let base = nombreBaseRol(rolDiscord.name);
+  if (!base || base.length < 2) {
+    base = item.nombre || nombreBaseRol(item.nombreRol || '');
+  }
+
+  if (item.emoji) {
+    return `${item.emoji} ${item.prefijo} ●┇${base}`;
+  }
+  return `${item.prefijo} ●┇${base}`;
 }
 
 function escanearServidor(guild) {
@@ -76,9 +95,7 @@ function escanearServidor(guild) {
   const usados = new Set();
 
   for (const item of catalogo) {
-    const oficial = item.nombreRol || item.nombre;
     let match = null;
-
     for (const rol of roles) {
       if (usados.has(rol.id)) continue;
       if (coincidePorNombre(rol, item)) {
@@ -88,12 +105,18 @@ function escanearServidor(guild) {
     }
 
     if (match) {
+      const destino = nombreConPrefijo(match, item);
       detectados.push({ item, rol: match });
       usados.add(match.id);
       guardarMapa(item.key, match.id, match.name, 'existente');
 
-      if (match.name !== oficial) {
-        aRenombrar.push({ item, rol: match, nombreActual: match.name, nombreOficial: oficial });
+      if (match.name !== destino) {
+        aRenombrar.push({
+          item,
+          rol: match,
+          nombreActual: match.name,
+          nombreDestino: destino,
+        });
       }
     } else {
       faltantes.push(item);
@@ -130,8 +153,7 @@ async function handle(interaction, accion, args) {
 }
 
 async function onMenu(interaction) {
-  const opcion = interaction.values[0];
-  switch (opcion) {
+  switch (interaction.values[0]) {
     case 'analizar': return analizar(interaction);
     case 'renombrar': return onRenombrarConfirmar(interaction);
     case 'crear': return onCrearConfirmar(interaction);
@@ -151,39 +173,39 @@ async function analizar(interaction) {
     color: COLORES.neutral,
     titulo: 'Informe de roles',
     campos: [
-      { name: 'Detectados por nombre', value: String(detectados.length), inline: true },
-      { name: 'Por renombrar', value: String(aRenombrar.length), inline: true },
+      { name: 'Detectados', value: String(detectados.length), inline: true },
+      { name: 'Prefijo por aplicar', value: String(aRenombrar.length), inline: true },
       { name: 'Faltantes', value: String(faltantes.length), inline: true },
-      { name: 'Otros (no organigrama)', value: String(noUsados.length), inline: true },
+      { name: 'Otros', value: String(noUsados.length), inline: true },
     ],
-    footer: 'Deteccion solo por nombre · sin perder roles',
+    footer: 'Se leen todos · se usan por nombre · solo se cambia el prefijo',
   }));
 
-  if (aRenombrar.length) {
+  if (detectados.length) {
     embeds.push(embedBase({
-      color: 0xe8b923,
-      titulo: `Por renombrar (${aRenombrar.length})`,
+      color: COLORES.medicina,
+      titulo: `Roles detectados (${detectados.length})`,
       descripcion: truncar(
-        aRenombrar.slice(0, 20).map((r) =>
-          `**${r.nombreActual}** → \`${r.nombreOficial}\``
-        ).join('\n') +
-        (aRenombrar.length > 20 ? `\n… +${aRenombrar.length - 20}` : '') +
-        '\n\nUsa **Renombrar al formato oficial**. El rol es el mismo (miembros y permisos se conservan).'
+        detectados.slice(0, 18).map((d) => `· **${d.rol.name}** → \`${d.item.key}\``).join('\n') +
+        (detectados.length > 18 ? `\n… +${detectados.length - 18}` : '')
       ),
-      footer: 'Mismo ID de rol',
+      footer: 'Se reutilizan · no se borran',
       timestamp: false,
     }));
   }
 
-  if (detectados.length && !aRenombrar.length) {
+  if (aRenombrar.length) {
     embeds.push(embedBase({
-      color: COLORES.medicina,
-      titulo: 'Ya en formato oficial',
+      color: 0xe8b923,
+      titulo: `Prefijo por aplicar (${aRenombrar.length})`,
       descripcion: truncar(
-        detectados.slice(0, 15).map((d) => `· ${d.rol.name}`).join('\n') +
-        (detectados.length > 15 ? `\n… +${detectados.length - 15}` : '')
+        aRenombrar.slice(0, 18).map((r) =>
+          `**${r.nombreActual}** → \`${r.nombreDestino}\``
+        ).join('\n') +
+        (aRenombrar.length > 18 ? `\n… +${aRenombrar.length - 18}` : '') +
+        '\n\nSolo cambia el prefijo. El nombre del rol se mantiene.'
       ),
-      footer: 'Sin cambios necesarios',
+      footer: 'Aplicar prefijos oficiales',
       timestamp: false,
     }));
   }
@@ -193,10 +215,10 @@ async function analizar(interaction) {
       color: COLORES.denegado,
       titulo: `Faltantes (${faltantes.length})`,
       descripcion: truncar(
-        faltantes.slice(0, 20).map((f) => `· ${f.nombreRol || f.nombre}`).join('\n') +
-        (faltantes.length > 20 ? `\n… +${faltantes.length - 20}` : '')
+        faltantes.slice(0, 18).map((f) => `· ${f.nombreRol || f.nombre}`).join('\n') +
+        (faltantes.length > 18 ? `\n… +${faltantes.length - 18}` : '')
       ),
-      footer: 'Se pueden crear con Crear roles faltantes',
+      footer: 'Crear roles faltantes',
       timestamp: false,
     }));
   }
@@ -209,7 +231,7 @@ async function analizar(interaction) {
         noUsados.slice(0, 12).map((r) => `· ${r.name}`).join('\n') +
         (noUsados.length > 12 ? `\n… +${noUsados.length - 12}` : '')
       ),
-      footer: 'No pertenecen al organigrama',
+      footer: 'No se tocan',
       timestamp: false,
     }));
   }
@@ -230,8 +252,8 @@ async function onRenombrarConfirmar(interaction) {
     const payload = {
       embeds: [embedBase({
         color: COLORES.medicina,
-        titulo: 'Renombrar',
-        descripcion: 'No hay roles que renombrar. Todos los detectados ya tienen el nombre oficial, o no hay coincidencias por nombre.',
+        titulo: 'Aplicar prefijos',
+        descripcion: 'No hay nada que cambiar. Los roles detectados ya tienen el prefijo correcto.',
         footer: 'Administracion',
       })],
       components: [],
@@ -242,20 +264,27 @@ async function onRenombrarConfirmar(interaction) {
   }
 
   const preview = aRenombrar.slice(0, 20).map((r) =>
-    `**${r.nombreActual}** → \`${r.nombreOficial}\``
+    `**${r.nombreActual}** → \`${r.nombreDestino}\``
   ).join('\n');
 
   const payload = {
     embeds: [embedBase({
       color: COLORES.neutral,
-      titulo: `Renombrar ${aRenombrar.length} roles`,
-      descripcion: `Se cambia **solo el nombre**. Mismo rol, mismos miembros, mismos permisos.\n\n${preview}${aRenombrar.length > 20 ? `\n… +${aRenombrar.length - 20}` : ''}`,
+      titulo: `Aplicar prefijo a ${aRenombrar.length} roles`,
+      descripcion: [
+        'Se cambia **solo el prefijo**.',
+        'El nombre que ya tenia el rol se conserva.',
+        'Mismo rol, mismos miembros, mismos permisos.',
+        '',
+        preview,
+        aRenombrar.length > 20 ? `… +${aRenombrar.length - 20}` : '',
+      ].filter(Boolean).join('\n'),
       footer: 'Confirmacion',
     })],
     components: [new ActionRowBuilder().addComponents(
       new ButtonBuilder()
         .setCustomId(`config_roles:renombrar_ejecutar:${interaction.user.id}`)
-        .setLabel(`Renombrar ${aRenombrar.length}`)
+        .setLabel(`Aplicar prefijos (${aRenombrar.length})`)
         .setStyle(ButtonStyle.Primary)
     )],
   };
@@ -278,7 +307,7 @@ async function onRenombrarEjecutar(interaction) {
   await guild.roles.fetch();
   const { aRenombrar } = escanearServidor(guild);
 
-  let renombrados = 0;
+  let hechos = 0;
   const fallos = [];
 
   for (const r of aRenombrar) {
@@ -288,25 +317,25 @@ async function onRenombrarEjecutar(interaction) {
         fallos.push(r.nombreActual);
         continue;
       }
-      if (rol.name === r.nombreOficial) continue;
+      if (rol.name === r.nombreDestino) continue;
 
-      await rol.setName(r.nombreOficial, `Aegis · renombrar organigrama · ${interaction.user.tag}`);
-      guardarMapa(r.item.key, rol.id, r.nombreOficial, 'existente');
-      renombrados++;
+      await rol.setName(r.nombreDestino, `Aegis · prefijo · ${interaction.user.tag}`);
+      guardarMapa(r.item.key, rol.id, r.nombreDestino, 'existente');
+      hechos++;
       await new Promise((res) => setTimeout(res, 400));
     } catch (err) {
       fallos.push(r.nombreActual);
-      console.error('[Renombrar]', r.nombreActual, err.message || err);
+      console.error('[Prefijo]', r.nombreActual, err.message || err);
     }
   }
 
-  auditoria.registrar(interaction.user.id, 'CONFIG_ROLES.RENOMBRAR', { renombrados, fallos: fallos.length });
+  auditoria.registrar(interaction.user.id, 'CONFIG_ROLES.PREFIJO', { hechos, fallos: fallos.length });
 
   await interaction.editReply({
     embeds: [embedBase({
       color: COLORES.medicina,
-      titulo: 'Renombrado completado',
-      descripcion: `Renombrados: **${renombrados}**\nRoles conservados (mismo ID y miembros).${fallos.length ? `\nSin renombrar: ${fallos.length} (sube el rol del bot por encima)` : ''}`,
+      titulo: 'Prefijos aplicados',
+      descripcion: `Actualizados: **${hechos}**\nRoles conservados.${fallos.length ? `\nSin cambiar: ${fallos.length} (sube el rol del bot)` : ''}\n\nSiguiente paso: **Organizar jerarquia**.`,
       footer: 'Administracion',
     })],
     components: [],
@@ -323,7 +352,7 @@ async function onCrearConfirmar(interaction) {
       embeds: [embedBase({
         color: COLORES.medicina,
         titulo: 'Crear faltantes',
-        descripcion: 'No hay faltantes. Todos los cargos del organigrama ya existen por nombre.',
+        descripcion: 'No hay faltantes. Todo lo del organigrama ya existe por nombre.',
         footer: 'Administracion',
       })],
       components: [],
@@ -338,7 +367,7 @@ async function onCrearConfirmar(interaction) {
     embeds: [embedBase({
       color: COLORES.neutral,
       titulo: `Crear ${faltantes.length} faltantes`,
-      descripcion: `Solo se crean los que **no existen por nombre**.\n\n${preview}${faltantes.length > 25 ? `\n… +${faltantes.length - 25}` : ''}`,
+      descripcion: `Solo los que no existen por nombre.\n\n${preview}${faltantes.length > 25 ? `\n… +${faltantes.length - 25}` : ''}`,
       footer: 'Confirmacion',
     })],
     components: [new ActionRowBuilder().addComponents(
@@ -365,7 +394,6 @@ async function onCrearEjecutar(interaction) {
   }
 
   await guild.roles.fetch();
-  // Re-escanear: si alguien renombro mientras tanto, no duplicar
   const { faltantes } = escanearServidor(guild);
 
   let creados = 0;
@@ -380,7 +408,7 @@ async function onCrearEjecutar(interaction) {
         color: colorInt,
         hoist: false,
         mentionable: false,
-        reason: `Aegis · crear faltante · ${interaction.user.tag}`,
+        reason: `Aegis · faltante · ${interaction.user.tag}`,
       });
       guardarMapa(item.key, rol.id, rol.name, 'bot');
       creados++;
@@ -396,7 +424,7 @@ async function onCrearEjecutar(interaction) {
     embeds: [embedBase({
       color: COLORES.medicina,
       titulo: 'Roles creados',
-      descripcion: `Creados: **${creados}**${errores.length ? `\nErrores: ${errores.length}` : ''}\n\nUsa **Organizar jerarquia** despues.`,
+      descripcion: `Creados: **${creados}**${errores.length ? `\nErrores: ${errores.length}` : ''}\n\nUsa **Organizar jerarquia**.`,
       footer: 'Administracion',
     })],
     components: [],
@@ -408,7 +436,17 @@ async function onOrganizarConfirmar(interaction) {
     embeds: [embedBase({
       color: COLORES.neutral,
       titulo: 'Organizar jerarquia',
-      descripcion: 'Ordena los roles del organigrama:\nStaff → Soporte → Cupula → Direcciones (Gerente SI encima de Director General) → SI → Seguridad → FTM/ERR → Medicina → Investigacion → Inteligencia → Clase D → Insurgencia → Permisos.\n\nSolo mueve roles del organigrama.',
+      descripcion: [
+        'Coloca cada rol detectado en su seccion:',
+        '',
+        'Staff → Soporte → Cupula → Direcciones',
+        '(Gerente SI encima de Director General)',
+        '→ SI → Seguridad → FTM / ERR',
+        '→ Medicina → Investigacion → Inteligencia',
+        '→ Clase D → Insurgencia → Permisos',
+        '',
+        'Solo mueve roles del organigrama. El resto no se toca.',
+      ].join('\n'),
       footer: 'Confirmacion',
     })],
     components: [new ActionRowBuilder().addComponents(
@@ -438,7 +476,6 @@ async function onOrganizarEjecutar(interaction) {
   const { detectados } = escanearServidor(guild);
   const ordenados = [...detectados].sort((a, b) => (a.item.orden || 999) - (b.item.orden || 999));
 
-  await guild.roles.fetch();
   const botPos = guild.members.me.roles.highest.position;
   let pos = botPos - 1;
   let movidos = 0;
@@ -464,7 +501,7 @@ async function onOrganizarEjecutar(interaction) {
     embeds: [embedBase({
       color: COLORES.medicina,
       titulo: 'Jerarquia organizada',
-      descripcion: `Reposicionados: **${movidos}**${fallos ? `\nSin mover: ${fallos}` : ''}`,
+      descripcion: `Roles en su lugar: **${movidos}**${fallos ? `\nSin mover: ${fallos}` : ''}`,
       footer: 'Administracion',
     })],
     components: [],
@@ -489,7 +526,7 @@ async function onEliminarConfirmar(interaction) {
       embeds: [embedBase({
         color: COLORES.neutral,
         titulo: 'Eliminar roles del bot',
-        descripcion: 'No hay roles marcados como creados por el bot. Los renombrados (existentes) no se borran.',
+        descripcion: 'No hay roles creados por el bot. Los que solo recibieron prefijo no se borran.',
         footer: 'Administracion',
       })],
       components: [],
@@ -503,8 +540,8 @@ async function onEliminarConfirmar(interaction) {
   const payload = {
     embeds: [embedBase({
       color: COLORES.denegado,
-      titulo: `Eliminar ${lista.length} roles creados por el bot`,
-      descripcion: `Solo los que el bot **creo**. Los que ya existian y se renombraron **no se tocan**.\n\n${preview}${lista.length > 25 ? `\n… +${lista.length - 25}` : ''}`,
+      titulo: `Eliminar ${lista.length} roles del bot`,
+      descripcion: `Solo los que el bot creo.\n\n${preview}${lista.length > 25 ? `\n… +${lista.length - 25}` : ''}`,
       footer: 'Confirmacion',
     })],
     components: [new ActionRowBuilder().addComponents(
