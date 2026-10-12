@@ -16,7 +16,6 @@ function cargarHandlers() {
   const archivos = fs.readdirSync(componentsPath).filter((f) => f.endsWith('.js'));
   for (const archivo of archivos) {
     try {
-      // Limpiar caché para hot-reload en reinicios
       const full = path.join(componentsPath, archivo);
       delete require.cache[require.resolve(full)];
       const modulo = require(full);
@@ -42,11 +41,21 @@ function parseCustomId(customId) {
 
 async function manejarInteraccion(interaction) {
   try {
+    if (interaction.isAutocomplete()) {
+      const comando = interaction.client.commands.get(interaction.commandName);
+      if (comando && typeof comando.autocomplete === 'function') {
+        await comando.autocomplete(interaction);
+      } else {
+        await interaction.respond([]).catch(() => {});
+      }
+      return;
+    }
+
     if (interaction.isChatInputCommand()) {
       const comando = interaction.client.commands.get(interaction.commandName);
       if (!comando) {
         await interaction.reply({
-          content: 'Este comando no está disponible.',
+          content: 'Este comando no esta disponible.',
           flags: MessageFlags.Ephemeral,
         }).catch(() => {});
         return;
@@ -66,7 +75,7 @@ async function manejarInteraccion(interaction) {
       const parsed = parseCustomId(interaction.customId);
       if (!parsed) {
         await interaction.reply({
-          content: 'Interacción no reconocida.',
+          content: 'Interaccion no reconocida.',
           flags: MessageFlags.Ephemeral,
         }).catch(() => {});
         return;
@@ -75,7 +84,7 @@ async function manejarInteraccion(interaction) {
       const handler = handlers.get(parsed.modulo);
       if (!handler) {
         await interaction.reply({
-          content: 'Este menú ya no está activo.',
+          content: 'Este menu ya no esta activo.',
           flags: MessageFlags.Ephemeral,
         }).catch(() => {});
         return;
@@ -85,7 +94,12 @@ async function manejarInteraccion(interaction) {
       return;
     }
   } catch (error) {
-    console.error('[Interacción]', error);
+    console.error('[Interaccion]', error);
+
+    if (interaction.isAutocomplete()) {
+      await interaction.respond([]).catch(() => {});
+      return;
+    }
 
     const payload = {
       content: 'Se produjo un error al procesar la solicitud. El incidente ha sido registrado.',
