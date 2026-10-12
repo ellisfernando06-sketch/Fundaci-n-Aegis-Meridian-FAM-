@@ -9,7 +9,7 @@
  *   MODERACION → admin jefe, senior, en prueba
  *   SOPORTE → soporte tecnico
  *   CUPULA → consejo
- *   SI / SEG / MED / INV / INT / CD / CAOS / PERMISOS
+ *   SI / SEG / MED / INV / INT / CD / CAOS / PERMISOS / LLAVES
  *   En facciones: mandan jefes y subcomandantes (sin subdirectores ni subgerentes)
  */
 
@@ -30,6 +30,7 @@ const SEPARADORES = [
   { key: 'SEP.CD', nombreRol: '━━━━━━━━『  CLASE D  』━━━━━━━━', orden: 300, color: '#1a1a1e' },
   { key: 'SEP.CAOS', nombreRol: '━━━━━━━━『  INSURGENCIA  』━━━━━━━━', orden: 340, color: '#1a1a1e' },
   { key: 'SEP.PERMISOS', nombreRol: '━━━━━━━━『  PERMISOS  』━━━━━━━━', orden: 380, color: '#1a1a1e' },
+  { key: 'SEP.LLAVES', nombreRol: '━━━━━━━━『  LLAVES / KEYS  』━━━━━━━━', orden: 400, color: '#1a1a1e' },
 ];
 
 const ORGANIGRAMA = {
