@@ -6,6 +6,8 @@ const { getDb, nextId } = require('../db');
 const auditoria = require('../services/auditoria');
 const { embedBase, COLORES } = require('../utils/plantillas');
 const { sanitizar, truncar } = require('../utils/helpers');
+const { aplicarSuspension, levantarSuspension } = require('../services/roles');
+const { actorTexto } = require('../services/solicitudes');
 
 const TIPOS = [
   { name: 'Amonestacion verbal', value: 'Amonestacion verbal' },
@@ -91,6 +93,7 @@ module.exports = {
       const motivo = sanitizar(interaction.options.getString('motivo'));
       const dias = interaction.options.getInteger('dias');
       const incidenteId = interaction.options.getString('incidente');
+      const otorgante = actorTexto(interaction.user);
 
       if (incidenteId) {
         const inc = db.prepare('SELECT id FROM incidentes WHERE id = ?').get(incidenteId);
@@ -120,15 +123,19 @@ module.exports = {
         VALUES (?, ?, ?, ?, ?, ?, ?, 'Activa', ?)
       `).run(id, user.id, tipo, dias || null, interaction.user.id, motivo, incidenteId || null, vence);
 
-      // Suspendido si tipo lo implica
       if (/suspension|expulsion/i.test(tipo)) {
-        db.prepare(
-          `UPDATE perfiles SET estado = 'Suspendido', actualizado_en = datetime('now') WHERE discord_id = ?`
-        ).run(user.id);
+        const member = await interaction.guild.members.fetch(user.id).catch(() => null);
+        if (member) {
+          await aplicarSuspension(interaction.guild, member, otorgante);
+        } else {
+          db.prepare(
+            `UPDATE perfiles SET estado = 'Suspendido', actualizado_en = datetime('now') WHERE discord_id = ?`
+          ).run(user.id);
+        }
       }
 
       auditoria.registrar(interaction.user.id, 'SANCION.APLICAR', {
-        id, sancionado: user.id, tipo, incidenteId,
+        id, sancionado: user.id, tipo, incidenteId, otorgante,
       });
 
       await interaction.editReply({
@@ -140,7 +147,7 @@ module.exports = {
             { name: 'Tipo', value: tipo, inline: true },
             { name: 'Dias', value: dias ? String(dias) : '—', inline: true },
             { name: 'Incidente', value: incidenteId || '—', inline: true },
-            { name: 'Emitida por', value: `<@${interaction.user.id}>`, inline: true },
+            { name: 'Emitida por', value: otorgante, inline: true },
             { name: 'Motivo', value: truncar(motivo, 500), inline: false },
           ],
           footer: 'Sanciones',
@@ -157,7 +164,8 @@ module.exports = {
       const desc = rows.length
         ? rows.map((r) =>
           `**${r.id}** · ${r.tipo} · ${r.estado}\n${sanitizar(r.motivo || '')}` +
-          (r.incidente_id ? ` · ${r.incidente_id}` : '')
+          (r.incidente_id ? ` · ${r.incidente_id}` : '') +
+          (r.emitida_por ? `\nEmitida por: <@${r.emitida_por}>` : '')
         ).join('\n\n')
         : 'Sin sanciones registradas.';
       await interaction.reply({
@@ -177,7 +185,10 @@ module.exports = {
         'SELECT * FROM sanciones ORDER BY creado_en DESC LIMIT 25'
       ).all();
       const desc = rows.length
-        ? rows.map((r) => `**${r.id}** · <@${r.sancionado_id}> · ${r.tipo} · ${r.estado}`).join('\n')
+        ? rows.map((r) =>
+          `**${r.id}** · <@${r.sancionado_id}> · ${r.tipo} · ${r.estado}` +
+          (r.emitida_por ? ` · por <@${r.emitida_por}>` : '')
+        ).join('\n')
         : 'Sin sanciones.';
       await interaction.reply({
         embeds: [embedBase({
@@ -207,12 +218,17 @@ module.exports = {
         return;
       }
       db.prepare("UPDATE sanciones SET estado = 'Levantada' WHERE id = ?").run(id);
-      auditoria.registrar(interaction.user.id, 'SANCION.LEVANTAR', { id, sancionado: row.sancionado_id });
+      const otorgante = actorTexto(interaction.user);
+      const member = await interaction.guild.members.fetch(row.sancionado_id).catch(() => null);
+      if (member) await levantarSuspension(interaction.guild, member, otorgante);
+      auditoria.registrar(interaction.user.id, 'SANCION.LEVANTAR', {
+        id, sancionado: row.sancionado_id, otorgante,
+      });
       await interaction.editReply({
         embeds: [embedBase({
           color: COLORES.medicina,
           titulo: 'Sancion levantada',
-          descripcion: `**${id}** de <@${row.sancionado_id}> ha sido levantada.`,
+          descripcion: `**${id}** de <@${row.sancionado_id}> ha sido levantada.\n\n**Levantada por:** ${otorgante}`,
           footer: 'Sanciones',
         })],
       });
