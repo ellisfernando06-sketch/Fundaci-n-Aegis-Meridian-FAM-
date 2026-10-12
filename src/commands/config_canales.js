@@ -15,7 +15,7 @@ module.exports = {
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
     .addSubcommand((s) =>
       s.setName('desplegar')
-        .setDescription('Crea categorias, canales de texto, oficinas de voz y enlaza keys')
+        .setDescription('Borra plantilla vieja y crea categorias/canales/voz con keys')
     )
     .addSubcommand((s) =>
       s.setName('resumen')
@@ -67,6 +67,7 @@ module.exports = {
             color: r.errores.length ? COLORES.amarillo : COLORES.medicina,
             titulo: 'Despliegue de canales',
             campos: [
+              { name: 'Borrados (plantilla vieja)', value: String(r.borrados ?? 0), inline: true },
               { name: 'Categorias', value: String(r.categorias), inline: true },
               { name: 'Canales de texto', value: String(r.textos), inline: true },
               { name: 'Canales de voz', value: String(r.voces), inline: true },
