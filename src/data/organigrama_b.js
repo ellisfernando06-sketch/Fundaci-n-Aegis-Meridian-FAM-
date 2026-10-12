@@ -87,6 +87,32 @@ const ROLES_PERMISOS = [
   { key: 'PERM.VISITANTE', nombreRol: 'Visitante', orden: 389, color: '#888780', aliases: ['visitante'] },
 ];
 
+/** Roles de llave (categoria KEYS) · se crean con /config_roles o /config_llaves */
+function construirRolesLlaves() {
+  let lista = [];
+  try {
+    const { LLAVES_INICIALES } = require('./llaves');
+    lista = LLAVES_INICIALES || [];
+  } catch (_) {
+    lista = [];
+  }
+  return lista.map((l, i) => ({
+    key: l.id,
+    nombreRol: `[KEY] ${l.nombre}`,
+    orden: 401 + i,
+    color: '#D4A017',
+    aliases: [
+      String(l.nombre || '').toLowerCase(),
+      String(l.id || '').toLowerCase(),
+      `llave ${String(l.nombre || '').toLowerCase()}`,
+    ],
+    tipo: 'llave',
+    llaveId: l.id,
+  }));
+}
+
+const ROLES_LLAVES = construirRolesLlaves();
+
 const ROLES_IGNORAR = ['bot oficial', 'bots', 'bot', '@everyone'];
 
 const ROLES_APOYO = {
@@ -145,6 +171,7 @@ function getJerarquiaCompleta() {
   for (const sep of SEPARADORES) items.push({ ...sep, tipo: 'separador', nombreRol: sep.nombreRol });
   for (const c of getTodosCargos()) items.push(c);
   for (const p of ROLES_PERMISOS) items.push({ ...p, tipo: 'permiso', prefijo: null });
+  for (const k of ROLES_LLAVES) items.push({ ...k, tipo: 'llave', prefijo: 'KEY' });
   items.sort((a, b) => (a.orden || 999) - (b.orden || 999));
   return items;
 }
@@ -192,6 +219,7 @@ module.exports = {
   ORGANIGRAMA,
   SEPARADORES,
   ROLES_PERMISOS,
+  ROLES_LLAVES,
   ROLES_IGNORAR,
   ROLES_APOYO,
   SITIOS_DEFAULT,
