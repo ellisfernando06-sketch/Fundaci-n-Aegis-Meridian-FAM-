@@ -8,4 +8,5 @@ const m = new Module(module.filename, module.parent);
 m.filename = __filename;
 m.paths = Module._nodeModulePaths(path.dirname(__filename));
 m._compile(code, __filename);
-module.exports = m.exports;
+const { aplicar } = require('./colores_faccion');
+module.exports = aplicar(m.exports);
