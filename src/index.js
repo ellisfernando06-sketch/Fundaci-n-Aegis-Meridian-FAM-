@@ -1,46 +1,40 @@
-require('dotenv').config();
+/**
+ * Fundacion Aegis-Meridian · Bot de Discord
+ * Health server primero; bot despues.
+ */
 
 const http = require('http');
-const fs = require('fs');
-const path = require('path');
 
-console.log('[AEGIS] Iniciando…');
-console.log('[AEGIS] Node', process.version);
-console.log('[AEGIS] DISCORD_TOKEN:', process.env.DISCORD_TOKEN ? 'definido (' + process.env.DISCORD_TOKEN.length + ' chars)' : 'FALTA');
-console.log('[AEGIS] CLIENT_ID:', process.env.CLIENT_ID || 'no definido');
-console.log('[AEGIS] GUILD_ID:', process.env.GUILD_ID || 'no definido');
-console.log('[AEGIS] DATABASE_PATH:', process.env.DATABASE_PATH || 'data/aegis.db');
-console.log('[AEGIS] PORT:', process.env.PORT || '3000');
+let botStatus = 'starting';
+let botReadyAt = null;
 
-// ---------------------------------------------------------------------------
-// 1) Health server PRIMERO (antes de better-sqlite3 / discord.js)
-//    Railway mata el proceso si no abre un puerto HTTP.
-// ---------------------------------------------------------------------------
-let botStatus = 'arrancando';
-let botTag = null;
-
-const PORT = Number(process.env.PORT) || 3000;
 const server = http.createServer((req, res) => {
-  res.writeHead(200, { 'Content-Type': 'application/json' });
-  res.end(JSON.stringify({
-    status: botStatus,
-    bot: botTag || 'conectando',
-    uptime: Math.floor(process.uptime()),
-  }));
+  if (req.url === '/health' || req.url === '/') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      ok: true,
+      status: botStatus,
+      readyAt: botReadyAt,
+      uptime: process.uptime(),
+    }));
+    return;
+  }
+  res.writeHead(404);
+  res.end('Not found');
 });
 
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`[AEGIS] Health server en 0.0.0.0:${PORT}`);
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => {
+  console.log('[AEGIS] Health server en puerto', PORT);
 });
 
 server.on('error', (err) => {
-  console.error('[AEGIS] Health server error:', err.message);
+  console.error('[AEGIS] Health server error', err);
 });
 
-// ---------------------------------------------------------------------------
-// 2) Carga controlada del resto
-// ---------------------------------------------------------------------------
 async function main() {
+  require('dotenv').config();
+
   let Client, Collection, GatewayIntentBits, Partials, Events, REST, Routes;
   try {
     const djs = require('discord.js');
@@ -51,40 +45,23 @@ async function main() {
     Events = djs.Events;
     REST = djs.REST;
     Routes = djs.Routes;
-    console.log('[AEGIS] discord.js cargado');
   } catch (err) {
     botStatus = 'error_discord_js';
-    console.error('[AEGIS] No se pudo cargar discord.js:', err);
-    return;
-  }
-
-  let getDb, cargarHandlers, manejarInteraccion, auditoria;
-  try {
-    getDb = require('./db').getDb;
-    console.log('[AEGIS] Módulo DB cargado');
-  } catch (err) {
-    botStatus = 'error_db_module';
-    console.error('[AEGIS] FATAL: no se pudo cargar better-sqlite3 / db:', err);
-    console.error('[AEGIS] Causa típica: fallo al compilar el módulo nativo en el build.');
-    return;
-  }
-
-  try {
-    const handlers = require('./handlers/interacciones');
-    cargarHandlers = handlers.cargarHandlers;
-    manejarInteraccion = handlers.manejarInteraccion;
-    auditoria = require('./services/auditoria');
-  } catch (err) {
-    botStatus = 'error_handlers';
-    console.error('[AEGIS] Error cargando handlers:', err);
+    console.error('[AEGIS] No se pudo cargar discord.js', err);
     return;
   }
 
   const token = process.env.DISCORD_TOKEN;
   if (!token) {
-    botStatus = 'sin_token';
-    console.error('[AEGIS] Falta DISCORD_TOKEN en Variables de Railway.');
+    botStatus = 'error_no_token';
+    console.error('[AEGIS] Falta DISCORD_TOKEN');
     return;
+  }
+
+  try {
+    require('./db').getDb();
+  } catch (err) {
+    console.error('[AEGIS] DB init', err);
   }
 
   const client = new Client({
@@ -97,88 +74,74 @@ async function main() {
 
   client.commands = new Collection();
 
-  function cargarComandos() {
-    const commandsPath = path.join(__dirname, 'commands');
-    if (!fs.existsSync(commandsPath)) return [];
-    const body = [];
-    for (const archivo of fs.readdirSync(commandsPath).filter((f) => f.endsWith('.js'))) {
+  // Cargar comandos
+  const fs = require('fs');
+  const path = require('path');
+  const commandsPath = path.join(__dirname, 'commands');
+  if (fs.existsSync(commandsPath)) {
+    for (const file of fs.readdirSync(commandsPath).filter((f) => f.endsWith('.js'))) {
       try {
-        const comando = require(path.join(commandsPath, archivo));
-        if (comando.data && comando.execute) {
-          client.commands.set(comando.data.name, comando);
-          body.push(comando.data.toJSON());
-          console.log('[AEGIS] Comando cargado:', comando.data.name);
+        const cmd = require(path.join(commandsPath, file));
+        if (cmd?.data?.name) {
+          client.commands.set(cmd.data.name, cmd);
+          console.log('[AEGIS] Comando:', cmd.data.name);
         }
       } catch (err) {
-        console.error('[AEGIS] Error cargando comando', archivo, err);
+        console.error('[AEGIS] Error comando', file, err);
       }
     }
-    return body;
   }
 
-  async function registrarComandos(commandBody) {
-    const clientId = process.env.CLIENT_ID;
-    const guildId = process.env.GUILD_ID;
-    if (!clientId || !commandBody.length) {
-      console.log('[AEGIS] Registro de comandos omitido (falta CLIENT_ID o no hay comandos)');
-      return;
-    }
-    const rest = new REST({ version: '10' }).setToken(token);
-    try {
-      if (guildId) {
-        await rest.put(Routes.applicationGuildCommands(clientId, guildId), { body: commandBody });
-        console.log(`[AEGIS] ${commandBody.length} comandos registrados en guild ${guildId}`);
-      } else {
-        await rest.put(Routes.applicationCommands(clientId), { body: commandBody });
-        console.log(`[AEGIS] ${commandBody.length} comandos registrados globalmente`);
-      }
-    } catch (err) {
-      console.error('[AEGIS] Error registrando comandos:', err.message || err);
-    }
-  }
+  const { cargarHandlers, manejarInteraccion } = require('./handlers/interacciones');
+  cargarHandlers();
 
   client.once(Events.ClientReady, async (c) => {
-    botTag = c.user.tag;
     botStatus = 'online';
+    botReadyAt = new Date().toISOString();
+    console.log('[AEGIS] Listo como', c.user.tag);
 
+    // Registrar slash commands
     try {
-      getDb();
-      console.log('[AEGIS] Base de datos lista');
+      const rest = new REST({ version: '10' }).setToken(token);
+      const body = [...client.commands.values()].map((cmd) => cmd.data.toJSON());
+      const clientId = process.env.CLIENT_ID || c.user.id;
+      const guildId = process.env.GUILD_ID;
+      if (guildId) {
+        await rest.put(Routes.applicationGuildCommands(clientId, guildId), { body });
+        console.log('[AEGIS] Comandos de guild registrados:', body.length);
+      } else {
+        await rest.put(Routes.applicationCommands(clientId), { body });
+        console.log('[AEGIS] Comandos globales registrados:', body.length);
+      }
     } catch (err) {
-      console.error('[AEGIS] Error abriendo DB (el bot sigue en línea):', err);
+      console.error('[AEGIS] Registro de comandos', err);
     }
+  });
 
-    const commandBody = cargarComandos();
+  // Fase 5: cuarentena al entrar (Visitante)
+  client.on(Events.GuildMemberAdd, async (member) => {
     try {
-      cargarHandlers();
-      console.log('[AEGIS] Handlers cargados');
+      const { aplicarCuarentena } = require('./services/roles');
+      await aplicarCuarentena(member.guild, member);
+      console.log('[AEGIS] Cuarentena aplicada a', member.user.tag);
     } catch (err) {
-      console.error('[AEGIS] Error handlers:', err);
+      console.error('[AEGIS] GuildMemberAdd', err);
     }
-
-    await registrarComandos(commandBody);
-    console.log(`[AEGIS] EN LÍNEA como ${c.user.tag} (${c.user.id})`);
-
-    try {
-      auditoria.registrar('SISTEMA', 'BOT.INICIO', `Sesión iniciada · ${c.user.tag}`);
-    } catch (_) {}
   });
 
   client.on(Events.InteractionCreate, (interaction) => {
-    try {
-      manejarInteraccion(interaction);
-    } catch (err) {
-      console.error('[AEGIS] Interaction error:', err);
-    }
+    manejarInteraccion(interaction).catch((err) => {
+      console.error('[Interaccion]', err);
+    });
   });
 
   client.on(Events.Error, (error) => console.error('[Discord Error]', error));
   client.on(Events.ShardDisconnect, (event) => {
-    botStatus = 'desconectado';
-    console.warn('[AEGIS] Gateway desconectado:', event?.code, event?.reason || '');
+    botStatus = 'disconnected';
+    console.warn('[AEGIS] Shard disconnect', event);
   });
   client.on(Events.ShardReconnecting, () => {
-    botStatus = 'reconectando';
+    botStatus = 'reconnecting';
     console.log('[AEGIS] Reconectando…');
   });
 
@@ -187,15 +150,13 @@ async function main() {
 
   try {
     await client.login(token);
-    console.log('[AEGIS] Login enviado al gateway');
   } catch (err) {
     botStatus = 'error_login';
-    console.error('[AEGIS] Login fallido:', err.message || err);
-    console.error('[AEGIS] Revisa: token válido, bot invitado, Server Members Intent activado.');
+    console.error('[AEGIS] Login fallido', err);
   }
 }
 
 main().catch((err) => {
-  botStatus = 'error_fatal';
-  console.error('[AEGIS] Error fatal en main():', err);
+  console.error('[AEGIS] Fatal', err);
+  botStatus = 'fatal';
 });
