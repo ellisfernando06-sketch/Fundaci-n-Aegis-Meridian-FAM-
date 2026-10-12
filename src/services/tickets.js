@@ -24,6 +24,34 @@ const TIPOS = {
   voz: { label: 'Voz', emoji: '🎙️', color: COLORES.cupula },
 };
 
+/** Cargos del organigrama que atienden tickets (prioridad: roles_map). */
+const CARGOS_STAFF_TICKET = [
+  'SP.TECNICO',
+  'SP.TECNICO_PRUEBA',
+  'ST.ADMIN_JEFE',
+  'ST.ADMIN_SENIOR',
+  'ST.ADMIN_PRUEBA',
+  'ST.FUNDADOR',
+  'ST.CO_CALIDAD',
+  'ST.CO_ESTRATEGIA',
+];
+
+/** Fragmentos de nombre de rol para detectar staff si no hay mapa. */
+const NOMBRES_STAFF = [
+  'soporte tecnico',
+  'soporte técnico',
+  'soporte',
+  'helper',
+  'admin en jefe',
+  'administrador en jefe',
+  'admin senior',
+  'administrador senior',
+  'admin en prueba',
+  'administrador en prueba',
+  'moderacion',
+  'moderación',
+];
+
 function asegurarTabla() {
   const db = getDb();
   db.exec(`
@@ -47,10 +75,68 @@ function esStaff(member) {
   if (member.permissions?.has(PermissionFlagsBits.Administrator)) return true;
   if (member.permissions?.has(PermissionFlagsBits.ManageChannels)) return true;
   if (member.permissions?.has(PermissionFlagsBits.ModerateMembers)) return true;
-  const nombres = ['helper', 'soporte', 'soporte tecnico', 'admin', 'moderacion', 'administrador', 'fundador', 'cofundador'];
-  return member.roles.cache.some((r) =>
-    nombres.some((n) => r.name.toLowerCase().includes(n))
-  );
+
+  const db = getDb();
+  for (const key of CARGOS_STAFF_TICKET) {
+    const row = db.prepare('SELECT role_id FROM roles_map WHERE cargo_key = ?').get(key);
+    if (row?.role_id && member.roles.cache.has(row.role_id)) return true;
+  }
+
+  return member.roles.cache.some((r) => {
+    const n = r.name.toLowerCase().normalize('NFD').replace(/\p{M}/gu, '');
+    return NOMBRES_STAFF.some((frag) => n.includes(frag.normalize('NFD').replace(/\p{M}/gu, '')));
+  });
+}
+
+/**
+ * Roles de staff a notificar y con acceso al ticket.
+ * Prioriza roles_map (SP.TECNICO, etc.) y luego coincidencia por nombre.
+ */
+function resolverRolesStaff(guild) {
+  const ids = new Set();
+  const db = getDb();
+
+  for (const key of CARGOS_STAFF_TICKET) {
+    const row = db.prepare('SELECT role_id FROM roles_map WHERE cargo_key = ?').get(key);
+    if (row?.role_id && guild.roles.cache.has(row.role_id)) {
+      ids.add(row.role_id);
+    }
+  }
+
+  for (const [, rol] of guild.roles.cache) {
+    if (rol.managed || rol.id === guild.id) continue;
+    const n = rol.name.toLowerCase().normalize('NFD').replace(/\p{M}/gu, '');
+    if (NOMBRES_STAFF.some((frag) => n.includes(frag.normalize('NFD').replace(/\p{M}/gu, '')))) {
+      ids.add(rol.id);
+    }
+    if (
+      rol.permissions.has(PermissionFlagsBits.Administrator) ||
+      rol.permissions.has(PermissionFlagsBits.ManageChannels) ||
+      rol.permissions.has(PermissionFlagsBits.ModerateMembers)
+    ) {
+      ids.add(rol.id);
+    }
+  }
+
+  return [...ids].map((id) => guild.roles.cache.get(id)).filter(Boolean);
+}
+
+function mencionesStaff(roles) {
+  if (!roles.length) return '';
+  // Limitar menciones para no spamear (soporte + admin primero)
+  const priorizados = roles
+    .slice()
+    .sort((a, b) => {
+      const score = (r) => {
+        const n = r.name.toLowerCase();
+        if (n.includes('soporte')) return 0;
+        if (n.includes('admin')) return 1;
+        return 2;
+      };
+      return score(a) - score(b);
+    })
+    .slice(0, 6);
+  return priorizados.map((r) => `<@&${r.id}>`).join(' ');
 }
 
 function iconoInstitucional(client, guild) {
@@ -72,9 +158,13 @@ async function asegurarCategoriaTickets(guild) {
   return cat;
 }
 
-/**
- * Panel publico profesional de la Mesa de Asistencia.
- */
+/** Nombre de canal seguro (Discord limita caracteres especiales). */
+function nombreCanalTicket(tipo, id) {
+  const limpio = String(id).toLowerCase().replace(/[^a-z0-9-]/g, '');
+  const t = String(tipo).toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 12);
+  return `ticket-${t}-${limpio}`.slice(0, 90);
+}
+
 function panelEmbed(ctx = {}) {
   const icon = iconoInstitucional(ctx.client, ctx.guild);
   const banner = bannerUrl();
@@ -89,21 +179,21 @@ function panelEmbed(ctx = {}) {
     descripcion:
       `*${MARCA.lema}*\n\n` +
       'Canal oficial de atención al personal y a la comunidad de la **Fundación Aegis-Meridian**.\n' +
-      'Selecciona el tipo de solicitud. Un agente de **Soporte**, **Administración** o **Finanzas** responderá en un canal privado.\n\n' +
+      'Selecciona el tipo de solicitud. Un agente de **Soporte Técnico** o **Administración** responderá en un canal privado.\n\n' +
       '─────────────────────────────',
     campos: [
       {
         name: '╭─  💠  Consulta general',
         value:
           'Dudas de rangos, verificación Roblox, acceso a áreas o funcionamiento del servidor.\n' +
-          '→ Botón **Soporte**',
+          '→ Botón **Soporte** · atiende **Soporte Técnico**',
         inline: false,
       },
       {
         name: '╭─  🛡️  Reporte formal',
         value:
           'Conducta indebida, abuso de poder o incidencias que requieran revisión disciplinaria.\n' +
-          '→ Botón **Reporte**',
+          '→ Botón **Reporte** · atiende **Administración / Soporte**',
         inline: false,
       },
       {
@@ -134,8 +224,7 @@ function panelEmbed(ctx = {}) {
           '· Un solo ticket abierto por persona\n' +
           '· Mantén el tono institucional\n' +
           '· No uses reportes para consultas triviales\n' +
-          '· El historial puede transcribirse a logs de mando\n' +
-          '· Las reclamaciones financieras requieren referencia de movimiento',
+          '· El historial puede transcribirse a logs de mando',
         inline: false,
       },
     ],
@@ -180,7 +269,7 @@ function panelBotones() {
   ];
 }
 
-function controlesTicket(ticketId, ctx = {}) {
+function controlesTicket(ticketId) {
   return [
     new ActionRowBuilder().addComponents(
       new ButtonBuilder()
@@ -232,12 +321,15 @@ function embedAperturaTicket({ id, tipo, memberId, vozId, client, guild }) {
       'Describe los hechos con fecha, involucrados y evidencias.\n' +
       'Evita acusaciones sin base; el historial se archiva.';
   } else {
-    instrucciones = 'Describe tu caso con claridad. El personal de Soporte o Administración tomará el hilo.';
+    instrucciones =
+      'Describe tu caso con claridad.\n' +
+      'El personal de **Soporte Técnico** o Administración atenderá este hilo.';
   }
 
+  campos.push({ name: 'Instrucciones', value: instrucciones, inline: false });
   campos.push({
-    name: 'Instrucciones',
-    value: instrucciones,
+    name: 'Atención',
+    value: 'Notificado: **Soporte Técnico** y staff con acceso a tickets.',
     inline: false,
   });
 
@@ -253,12 +345,36 @@ function embedAperturaTicket({ id, tipo, memberId, vozId, client, guild }) {
   });
 }
 
+async function aplicarAccesoStaff(channel, rolesStaff, esVoz = false) {
+  for (const rol of rolesStaff) {
+    try {
+      if (esVoz) {
+        await channel.permissionOverwrites.edit(rol.id, {
+          ViewChannel: true,
+          Connect: true,
+          Speak: true,
+        });
+      } else {
+        await channel.permissionOverwrites.edit(rol.id, {
+          ViewChannel: true,
+          SendMessages: true,
+          ReadMessageHistory: true,
+          AttachFiles: true,
+          EmbedLinks: true,
+        });
+      }
+    } catch (err) {
+      console.warn('[Tickets] overwrite rol', rol.name, err.message);
+    }
+  }
+}
+
 async function crearTicketTexto(guild, member, tipo, client) {
   asegurarTabla();
   const db = getDb();
   const id = nextId('TKT');
   const cat = await asegurarCategoriaTickets(guild);
-  const meta = TIPOS[tipo] || TIPOS.soporte;
+  const rolesStaff = resolverRolesStaff(guild);
 
   const overwrites = [
     { id: guild.id, deny: [PermissionFlagsBits.ViewChannel] },
@@ -286,28 +402,26 @@ async function crearTicketTexto(guild, member, tipo, client) {
     });
   }
 
+  for (const rol of rolesStaff) {
+    overwrites.push({
+      id: rol.id,
+      allow: [
+        PermissionFlagsBits.ViewChannel,
+        PermissionFlagsBits.SendMessages,
+        PermissionFlagsBits.ReadMessageHistory,
+        PermissionFlagsBits.AttachFiles,
+        PermissionFlagsBits.EmbedLinks,
+      ],
+    });
+  }
+
   const canal = await guild.channels.create({
-    name: `︱🎫・${tipo}-${id.toLowerCase()}`,
+    name: nombreCanalTicket(tipo, id),
     type: ChannelType.GuildText,
     parent: cat.id,
     permissionOverwrites: overwrites,
     reason: `Aegis · ticket ${id}`,
   });
-
-  for (const [, rol] of guild.roles.cache) {
-    if (rol.managed || rol.id === guild.id) continue;
-    if (
-      rol.permissions.has(PermissionFlagsBits.Administrator) ||
-      rol.permissions.has(PermissionFlagsBits.ManageChannels) ||
-      rol.permissions.has(PermissionFlagsBits.ModerateMembers)
-    ) {
-      await canal.permissionOverwrites.edit(rol.id, {
-        ViewChannel: true,
-        SendMessages: true,
-        ReadMessageHistory: true,
-      }).catch(() => {});
-    }
-  }
 
   db.prepare(`
     INSERT INTO tickets (id, tipo, canal_id, autor_id, estado, motivo)
@@ -316,13 +430,22 @@ async function crearTicketTexto(guild, member, tipo, client) {
 
   auditoria.registrar(member.id, 'TICKET.ABRIR', { id, tipo, canal: canal.id });
 
+  const ping = mencionesStaff(rolesStaff);
+  const content = ping
+    ? `${ping}\nSolicitante: <@${member.id}>`
+    : `<@${member.id}>`;
+
   await canal.send({
-    content: `<@${member.id}>`,
+    content,
     embeds: [embedAperturaTicket({ id, tipo, memberId: member.id, client, guild })],
-    components: controlesTicket(id, { client, guild }),
+    components: controlesTicket(id),
+    allowedMentions: {
+      roles: rolesStaff.map((r) => r.id),
+      users: [member.id],
+    },
   });
 
-  return { id, canal };
+  return { id, canal, rolesStaff };
 }
 
 async function crearTicketVoz(guild, member, client) {
@@ -330,62 +453,85 @@ async function crearTicketVoz(guild, member, client) {
   const db = getDb();
   const id = nextId('TKT');
   const cat = await asegurarCategoriaTickets(guild);
+  const rolesStaff = resolverRolesStaff(guild);
+
+  const overwritesTexto = [
+    { id: guild.id, deny: [PermissionFlagsBits.ViewChannel] },
+    {
+      id: member.id,
+      allow: [
+        PermissionFlagsBits.ViewChannel,
+        PermissionFlagsBits.SendMessages,
+        PermissionFlagsBits.ReadMessageHistory,
+      ],
+    },
+  ];
+  const overwritesVoz = [
+    { id: guild.id, deny: [PermissionFlagsBits.Connect, PermissionFlagsBits.ViewChannel] },
+    {
+      id: member.id,
+      allow: [
+        PermissionFlagsBits.ViewChannel,
+        PermissionFlagsBits.Connect,
+        PermissionFlagsBits.Speak,
+      ],
+    },
+  ];
+
+  if (guild.members.me) {
+    overwritesTexto.push({
+      id: guild.members.me.id,
+      allow: [
+        PermissionFlagsBits.ViewChannel,
+        PermissionFlagsBits.SendMessages,
+        PermissionFlagsBits.ManageChannels,
+        PermissionFlagsBits.ReadMessageHistory,
+      ],
+    });
+    overwritesVoz.push({
+      id: guild.members.me.id,
+      allow: [
+        PermissionFlagsBits.ViewChannel,
+        PermissionFlagsBits.Connect,
+        PermissionFlagsBits.ManageChannels,
+      ],
+    });
+  }
+
+  for (const rol of rolesStaff) {
+    overwritesTexto.push({
+      id: rol.id,
+      allow: [
+        PermissionFlagsBits.ViewChannel,
+        PermissionFlagsBits.SendMessages,
+        PermissionFlagsBits.ReadMessageHistory,
+      ],
+    });
+    overwritesVoz.push({
+      id: rol.id,
+      allow: [
+        PermissionFlagsBits.ViewChannel,
+        PermissionFlagsBits.Connect,
+        PermissionFlagsBits.Speak,
+      ],
+    });
+  }
 
   const texto = await guild.channels.create({
-    name: `︱🎫・voz-${id.toLowerCase()}`,
+    name: nombreCanalTicket('voz', id),
     type: ChannelType.GuildText,
     parent: cat.id,
-    permissionOverwrites: [
-      { id: guild.id, deny: [PermissionFlagsBits.ViewChannel] },
-      {
-        id: member.id,
-        allow: [
-          PermissionFlagsBits.ViewChannel,
-          PermissionFlagsBits.SendMessages,
-          PermissionFlagsBits.ReadMessageHistory,
-        ],
-      },
-    ],
+    permissionOverwrites: overwritesTexto,
     reason: `Aegis · ticket voz ${id}`,
   });
 
   const voz = await guild.channels.create({
-    name: `︱🎙️・ticket-${id.toLowerCase()}`,
+    name: `voz-${String(id).toLowerCase().replace(/[^a-z0-9-]/g, '')}`.slice(0, 90),
     type: ChannelType.GuildVoice,
     parent: cat.id,
-    permissionOverwrites: [
-      { id: guild.id, deny: [PermissionFlagsBits.Connect, PermissionFlagsBits.ViewChannel] },
-      {
-        id: member.id,
-        allow: [
-          PermissionFlagsBits.ViewChannel,
-          PermissionFlagsBits.Connect,
-          PermissionFlagsBits.Speak,
-        ],
-      },
-    ],
+    permissionOverwrites: overwritesVoz,
     reason: `Aegis · VC ticket ${id}`,
   });
-
-  for (const [, rol] of guild.roles.cache) {
-    if (rol.managed || rol.id === guild.id) continue;
-    if (
-      rol.permissions.has(PermissionFlagsBits.Administrator) ||
-      rol.permissions.has(PermissionFlagsBits.ManageChannels) ||
-      rol.permissions.has(PermissionFlagsBits.ModerateMembers)
-    ) {
-      await texto.permissionOverwrites.edit(rol.id, {
-        ViewChannel: true,
-        SendMessages: true,
-        ReadMessageHistory: true,
-      }).catch(() => {});
-      await voz.permissionOverwrites.edit(rol.id, {
-        ViewChannel: true,
-        Connect: true,
-        Speak: true,
-      }).catch(() => {});
-    }
-  }
 
   db.prepare(`
     INSERT INTO tickets (id, tipo, canal_id, voz_id, autor_id, estado, motivo)
@@ -394,15 +540,24 @@ async function crearTicketVoz(guild, member, client) {
 
   auditoria.registrar(member.id, 'TICKET.ABRIR_VOZ', { id, texto: texto.id, voz: voz.id });
 
+  const ping = mencionesStaff(rolesStaff);
+  const content = ping
+    ? `${ping}\nSolicitante: <@${member.id}>`
+    : `<@${member.id}>`;
+
   await texto.send({
-    content: `<@${member.id}>`,
+    content,
     embeds: [embedAperturaTicket({
       id, tipo: 'voz', memberId: member.id, vozId: voz.id, client, guild,
     })],
-    components: controlesTicket(id, { client, guild }),
+    components: controlesTicket(id),
+    allowedMentions: {
+      roles: rolesStaff.map((r) => r.id),
+      users: [member.id],
+    },
   });
 
-  return { id, canal: texto, voz };
+  return { id, canal: texto, voz, rolesStaff };
 }
 
 async function agregarPersona(guild, ticketId, userId, actor) {
@@ -578,6 +733,7 @@ module.exports = {
   asegurarTabla,
   esStaff,
   TIPOS,
+  resolverRolesStaff,
   panelEmbed,
   panelBotones,
   controlesTicket,
