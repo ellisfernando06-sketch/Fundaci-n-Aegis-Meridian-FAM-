@@ -10,7 +10,7 @@ const { embedBase, COLORES } = require('../utils/plantillas');
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('config_roles')
-    .setDescription('Crear, analizar y organizar el organigrama de roles')
+    .setDescription('Panel de roles: crear, renombrar, eliminar y ordenar')
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 
   async execute(interaction) {
@@ -19,42 +19,54 @@ module.exports = {
       .setPlaceholder('Selecciona una accion')
       .addOptions([
         {
-          label: 'Desplegar organigrama',
-          value: 'desplegar',
-          description: 'Crea los faltantes y los ordena',
+          label: 'Crear roles del organigrama',
+          value: 'crear',
+          description: 'Crea los faltantes (cargos, separadores, permisos)',
           emoji: '🛠️',
         },
         {
-          label: 'Ver organigrama',
-          value: 'organigrama',
-          description: 'Jerarquia oficial completa',
-          emoji: '📋',
+          label: 'Renombrar a nombres oficiales',
+          value: 'renombrar',
+          description: 'Aplica el nombre oficial XX ●┇ a los detectados',
+          emoji: '✏️',
+        },
+        {
+          label: 'Ordenar jerarquia',
+          value: 'organizar',
+          description: 'Coloca cada rol en su seccion del organigrama',
+          emoji: '📐',
+        },
+        {
+          label: 'Eliminar roles del bot',
+          value: 'eliminar_bot',
+          description: 'Borra solo los roles que el bot creo',
+          emoji: '🗑️',
         },
         {
           label: 'Analizar roles',
           value: 'analizar',
-          description: 'Detecta existentes y faltantes',
+          description: 'Cuantos existen y cuantos faltan',
           emoji: '🔍',
         },
         {
-          label: 'Organizar jerarquia',
-          value: 'organizar',
-          description: 'Solo reordena los ya creados',
-          emoji: '📐',
+          label: 'Ver organigrama',
+          value: 'organigrama',
+          description: 'Lista oficial completa',
+          emoji: '📋',
         },
       ]);
 
     const embed = embedBase({
       color: COLORES.neutral,
-      titulo: 'Configuracion de roles',
+      titulo: 'Panel de roles',
       descripcion: [
-        '**Desplegar organigrama** — crea roles faltantes (Fundacion, Direcciones, Moderacion, facciones, permisos) y los ordena.',
-        '**Ver organigrama** — lista oficial.',
-        '**Analizar** — cuantos faltan.',
-        '**Organizar** — solo mueve posiciones.',
+        '**Crear** — genera los roles faltantes del organigrama.',
+        '**Renombrar** — deja cada rol con su nombre oficial.',
+        '**Ordenar** — los coloca en su seccion (Fundacion → Direcciones → …).',
+        '**Eliminar (bot)** — quita solo los que creo el bot.',
         '',
-        'El rol del bot debe estar **por encima** de todos los roles que vaya a crear.',
-        'Borrar todos: `/eliminar_roles`',
+        'Para borrar **todos** los roles editables: `/eliminar_roles`',
+        'El rol del bot debe quedar **por encima** de los que gestione.',
       ].join('\n'),
       footer: 'Administracion · Fundacion Aegis-Meridian',
     });
