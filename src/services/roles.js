@@ -33,6 +33,16 @@ async function quitarRolesDeOrganigrama(member) {
   }
 }
 
+function asegurarPerfil(discordId) {
+  const db = getDb();
+  const p = db.prepare('SELECT * FROM perfiles WHERE discord_id = ?').get(discordId);
+  if (p) return p;
+  db.prepare(
+    `INSERT INTO perfiles (discord_id, estado) VALUES (?, 'Visitante')`
+  ).run(discordId);
+  return db.prepare('SELECT * FROM perfiles WHERE discord_id = ?').get(discordId);
+}
+
 /**
  * Asigna cargo de organigrama a un miembro: actualiza perfil, rol Discord e historial.
  */
@@ -41,7 +51,7 @@ async function asignarCargo(guild, member, cargoKey, actorTag, motivo = null) {
   if (!cargo) throw new Error('Cargo no encontrado en el organigrama');
 
   const db = getDb();
-  const perfil = db.prepare('SELECT * FROM perfiles WHERE discord_id = ?').get(member.id);
+  const perfil = asegurarPerfil(member.id);
   const rangoAnterior = perfil?.cargo || null;
 
   const roleId = roleIdDeCargo(cargoKey);
@@ -99,10 +109,10 @@ function siguienteHistorial() {
 async function setAutorizacion(guild, member, nivel, actorTag, motivo = null) {
   const n = Math.max(0, Math.min(5, Number(nivel) || 0));
   const db = getDb();
+  asegurarPerfil(member.id);
   const perfil = db.prepare('SELECT * FROM perfiles WHERE discord_id = ?').get(member.id);
   const anterior = perfil?.nivel_auth ?? 0;
 
-  // Quitar roles de nivel PERM.N*
   for (let i = 0; i <= 5; i++) {
     const rid = roleIdDePermiso(`PERM.N${i}`);
     if (rid && member.roles.cache.has(rid)) {
@@ -130,6 +140,7 @@ async function setAutorizacion(guild, member, nivel, actorTag, motivo = null) {
 
 async function setArea(guild, member, area, actorTag) {
   const db = getDb();
+  asegurarPerfil(member.id);
   db.prepare(`
     UPDATE perfiles SET area = ?, actualizado_en = datetime('now') WHERE discord_id = ?
   `).run(area, member.id);
@@ -138,9 +149,6 @@ async function setArea(guild, member, area, actorTag) {
   return { area };
 }
 
-/**
- * Otorga una llave: registra titular y aplica overwrites en canales vinculados.
- */
 async function otorgarLlave(guild, member, llaveId, actorTag, motivo = null) {
   const db = getDb();
   const llave = db.prepare('SELECT * FROM llaves WHERE id = ? AND activa = 1').get(llaveId);
@@ -156,7 +164,6 @@ async function otorgarLlave(guild, member, llaveId, actorTag, motivo = null) {
     VALUES (?, ?, 'manual', ?, ?, 1)
   `).run(llaveId, member.id, actorTag, motivo || 'Otorgamiento manual');
 
-  // Rol de llave si existe
   if (llave.role_id) {
     const rol = guild.roles.cache.get(llave.role_id);
     if (rol?.editable) {
@@ -164,7 +171,6 @@ async function otorgarLlave(guild, member, llaveId, actorTag, motivo = null) {
     }
   }
 
-  // Overwrites en canales
   let canales = [];
   try { canales = JSON.parse(llave.canales_json || '[]'); } catch (_) { canales = []; }
   for (const channelId of canales) {
