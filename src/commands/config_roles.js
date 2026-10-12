@@ -10,7 +10,7 @@ const { embedBase, COLORES } = require('../utils/plantillas');
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('config_roles')
-    .setDescription('Analisis, creacion y organizacion de roles del organigrama')
+    .setDescription('Crear, analizar y organizar el organigrama de roles')
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 
   async execute(interaction) {
@@ -19,27 +19,27 @@ module.exports = {
       .setPlaceholder('Selecciona una accion')
       .addOptions([
         {
+          label: 'Desplegar organigrama',
+          value: 'desplegar',
+          description: 'Crea los faltantes y los ordena',
+          emoji: '🛠️',
+        },
+        {
           label: 'Ver organigrama',
           value: 'organigrama',
-          description: 'Jerarquia completa de roles',
+          description: 'Jerarquia oficial completa',
           emoji: '📋',
         },
         {
-          label: 'Analizar roles del servidor',
+          label: 'Analizar roles',
           value: 'analizar',
-          description: 'Detecta existentes y faltantes por nombre',
+          description: 'Detecta existentes y faltantes',
           emoji: '🔍',
-        },
-        {
-          label: 'Crear roles faltantes',
-          value: 'crear',
-          description: 'Crea el organigrama (XX ●┇Nombre)',
-          emoji: '🛠️',
         },
         {
           label: 'Organizar jerarquia',
           value: 'organizar',
-          description: 'Coloca cada rol en su seccion',
+          description: 'Solo reordena los ya creados',
           emoji: '📐',
         },
       ]);
@@ -48,12 +48,12 @@ module.exports = {
       color: COLORES.neutral,
       titulo: 'Configuracion de roles',
       descripcion: [
-        '**Ver organigrama** — jerarquia oficial completa.',
-        '**Analizar** — detecta roles por nombre.',
-        '**Crear faltantes** — crea los que falten.',
-        '**Organizar** — los ordena por seccion.',
+        '**Desplegar organigrama** — crea roles faltantes (Fundacion, Direcciones, Moderacion, facciones, permisos) y los ordena.',
+        '**Ver organigrama** — lista oficial.',
+        '**Analizar** — cuantos faltan.',
+        '**Organizar** — solo mueve posiciones.',
         '',
-        'Orden: FUNDACION → DIRECCIONES → STAFF → SOPORTE → …',
+        'El rol del bot debe estar **por encima** de todos los roles que vaya a crear.',
         'Borrar todos: `/eliminar_roles`',
       ].join('\n'),
       footer: 'Administracion · Fundacion Aegis-Meridian',
