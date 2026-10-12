@@ -21,7 +21,6 @@ function resolverRutaDb() {
       if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
       }
-      // Probar escritura
       const testFile = path.join(dir, '.aegis_write_test');
       fs.writeFileSync(testFile, 'ok');
       fs.unlinkSync(testFile);
@@ -50,31 +49,42 @@ function getDb() {
   return db;
 }
 
+function upsertLlaves() {
+  const insert = db.prepare(`
+    INSERT INTO llaves (id, nombre, funcion, nombre_rol, tipo, rama, alcance, nivel_min, otorgan_json, canales_json, activa)
+    VALUES (@id, @nombre, @funcion, @nombre_rol, @tipo, @rama, @alcance, @nivelMin, @otorgan_json, '[]', 1)
+    ON CONFLICT(id) DO UPDATE SET
+      nombre = excluded.nombre,
+      funcion = excluded.funcion,
+      nombre_rol = excluded.nombre_rol,
+      tipo = excluded.tipo,
+      rama = excluded.rama,
+      alcance = excluded.alcance,
+      nivel_min = excluded.nivel_min,
+      otorgan_json = excluded.otorgan_json,
+      actualizado_en = datetime('now')
+  `);
+  const tx = db.transaction((llaves) => {
+    for (const l of llaves) {
+      insert.run({
+        id: l.id,
+        nombre: l.nombre,
+        funcion: l.funcion,
+        nombre_rol: `[KEY] ${l.nombre}`,
+        tipo: l.tipo,
+        rama: l.rama || null,
+        alcance: l.alcance || null,
+        nivelMin: l.nivelMin ?? 0,
+        otorgan_json: l.otorgan ? JSON.stringify(l.otorgan) : null,
+      });
+    }
+  });
+  tx(LLAVES_INICIALES);
+}
+
 function seedInicial() {
-  const countLlaves = db.prepare('SELECT COUNT(*) AS c FROM llaves').get().c;
-  if (countLlaves === 0) {
-    const insert = db.prepare(`
-      INSERT INTO llaves (id, nombre, funcion, nombre_rol, tipo, rama, alcance, nivel_min, otorgan_json, canales_json, activa)
-      VALUES (@id, @nombre, @funcion, @nombre_rol, @tipo, @rama, @alcance, @nivelMin, @otorgan_json, '[]', 1)
-    `);
-    const tx = db.transaction((llaves) => {
-      for (const l of llaves) {
-        insert.run({
-          id: l.id,
-          nombre: l.nombre,
-          funcion: l.funcion,
-          nombre_rol: `[KEY] ${l.nombre}`,
-          tipo: l.tipo,
-          rama: l.rama,
-          alcance: l.alcance,
-          nivelMin: l.nivelMin,
-          otorgan_json: l.otorgan ? JSON.stringify(l.otorgan) : null,
-        });
-      }
-    });
-    tx(LLAVES_INICIALES);
-    console.log('[AEGIS] Seed de llaves completado');
-  }
+  upsertLlaves();
+  console.log('[AEGIS] Llaves sincronizadas:', LLAVES_INICIALES.length);
 
   const countConfig = db.prepare('SELECT COUNT(*) AS c FROM config').get().c;
   if (countConfig === 0) {
@@ -85,7 +95,13 @@ function seedInicial() {
     set.run('alerta_mensaje', 'Sitio en estado normal de operaciones.');
   }
 
-  const contadores = ['PER', 'AP', 'FAM', 'INC', 'MIS', 'SAN', 'EXP', 'SOL'];
+  // Canal oculto para /interna (opcional)
+  const canalInterna = db.prepare("SELECT valor FROM config WHERE clave = 'canal_interna'").get();
+  if (!canalInterna) {
+    db.prepare("INSERT OR IGNORE INTO config (clave, valor) VALUES ('canal_interna', '')").run();
+  }
+
+  const contadores = ['PER', 'AP', 'FAM', 'INC', 'MIS', 'SAN', 'EXP', 'SOL', 'CAS'];
   const insertCont = db.prepare('INSERT OR IGNORE INTO contadores (tipo, valor) VALUES (?, 0)');
   for (const t of contadores) {
     insertCont.run(t);
