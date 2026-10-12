@@ -1,5 +1,6 @@
 /**
  * Tickets de soporte · texto y voz
+ * Panel institucional Fundacion Aegis-Meridian
  */
 
 const {
@@ -8,10 +9,9 @@ const {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
-  UserSelectMenuBuilder,
 } = require('discord.js');
 const { getDb, nextId, getConfig, setConfig } = require('../db');
-const { embedBase, COLORES } = require('../utils/plantillas');
+const { embedBase, COLORES, MARCA } = require('../utils/plantillas');
 const { sanitizar, truncar } = require('../utils/helpers');
 const auditoria = require('./auditoria');
 const { actorTexto } = require('./solicitudes');
@@ -39,11 +39,18 @@ function esStaff(member) {
   if (member.permissions?.has(PermissionFlagsBits.Administrator)) return true;
   if (member.permissions?.has(PermissionFlagsBits.ManageChannels)) return true;
   if (member.permissions?.has(PermissionFlagsBits.ModerateMembers)) return true;
-  // Roles helper por nombre
   const nombres = ['helper', 'soporte', 'soporte tecnico', 'admin', 'moderacion', 'administrador'];
   return member.roles.cache.some((r) =>
     nombres.some((n) => r.name.toLowerCase().includes(n))
   );
+}
+
+function iconoInstitucional(client, guild) {
+  const custom = process.env.AEGIS_LOGO_URL || getConfig('logo_url');
+  if (custom) return custom;
+  if (guild?.iconURL) return guild.iconURL({ size: 128 });
+  if (client?.user) return client.user.displayAvatarURL({ size: 128 });
+  return null;
 }
 
 async function asegurarCategoriaTickets(guild) {
@@ -61,16 +68,61 @@ async function asegurarCategoriaTickets(guild) {
   return cat;
 }
 
-function panelEmbed() {
+/**
+ * Panel publico profesional.
+ * @param {{ client?, guild? }} ctx
+ */
+function panelEmbed(ctx = {}) {
+  const icon = iconoInstitucional(ctx.client, ctx.guild);
+
   return embedBase({
-    color: COLORES.cupula,
-    titulo: 'Centro de tickets · Fundación Aegis-Meridian',
+    color: COLORES.institucional,
+    author: {
+      name: `${MARCA.nombre}`,
+      iconURL: icon || undefined,
+    },
+    titulo: 'Mesa de Asistencia',
     descripcion:
-      'Selecciona el tipo de asistencia.\n\n' +
-      '**Soporte** — consulta o ayuda general\n' +
-      '**Reporte** — incidente o denuncia\n' +
-      '**Ticket de voz** — sala de voz privada con el staff',
-    footer: 'Tickets',
+      `*${MARCA.lema}*\n\n` +
+      'Canal oficial de atencion al personal y a la comunidad.\n' +
+      'Elige el tipo de solicitud. Un agente de **Soporte** o **Administracion** respondera en un canal privado.\n\n' +
+      '─────────────────────────────',
+    campos: [
+      {
+        name: '╭─  Consulta general',
+        value:
+          'Dudas de rangos, verificacion, acceso a areas o funcionamiento del servidor.\n' +
+          '→ Boton **Soporte**',
+        inline: false,
+      },
+      {
+        name: '╭─  Reporte formal',
+        value:
+          'Conducta indebida, abuso de poder o incidencias que requieran revision disciplinaria.\n' +
+          '→ Boton **Reporte**',
+        inline: false,
+      },
+      {
+        name: '╭─  Sala de voz privada',
+        value:
+          'Conversacion en tiempo real con el staff (canal de voz + control por texto).\n' +
+          '→ Boton **Ticket de voz**',
+        inline: false,
+      },
+      {
+        name: '─────────────────────────────',
+        value:
+          '**Normas de uso**\n' +
+          '· Un solo ticket abierto por persona\n' +
+          '· Mantén el tono institucional\n' +
+          '· No uses reportes para consultas triviales\n' +
+          '· El historial puede transcribirse a logs de mando',
+        inline: false,
+      },
+    ],
+    thumbnail: icon || undefined,
+    footer: 'Mesa de Asistencia',
+    footerIcon: icon || undefined,
   });
 }
 
@@ -79,38 +131,77 @@ function panelBotones() {
     new ButtonBuilder()
       .setCustomId('tickets:abrir:soporte')
       .setLabel('Soporte')
+      .setEmoji('💠')
       .setStyle(ButtonStyle.Primary),
     new ButtonBuilder()
       .setCustomId('tickets:abrir:reporte')
       .setLabel('Reporte')
+      .setEmoji('🛡️')
       .setStyle(ButtonStyle.Danger),
     new ButtonBuilder()
       .setCustomId('tickets:abrir:voz')
       .setLabel('Ticket de voz')
+      .setEmoji('🎙️')
       .setStyle(ButtonStyle.Secondary),
   );
 }
 
-function controlesTicket(ticketId) {
+function controlesTicket(ticketId, ctx = {}) {
+  const icon = iconoInstitucional(ctx.client, ctx.guild);
   return [
     new ActionRowBuilder().addComponents(
       new ButtonBuilder()
         .setCustomId(`tickets:agregar_menu:${ticketId}`)
         .setLabel('Agregar persona')
+        .setEmoji('➕')
         .setStyle(ButtonStyle.Primary),
       new ButtonBuilder()
         .setCustomId(`tickets:transcribir:${ticketId}`)
         .setLabel('Transcribir')
+        .setEmoji('📄')
         .setStyle(ButtonStyle.Secondary),
       new ButtonBuilder()
         .setCustomId(`tickets:cerrar:${ticketId}`)
-        .setLabel('Cerrar y transcribir')
+        .setLabel('Cerrar ticket')
+        .setEmoji('🔒')
         .setStyle(ButtonStyle.Danger),
     ),
   ];
 }
 
-async function crearTicketTexto(guild, member, tipo) {
+function embedAperturaTicket({ id, tipo, memberId, vozId, client, guild }) {
+  const icon = iconoInstitucional(client, guild);
+  const esVoz = tipo === 'voz';
+  const campos = [
+    { name: 'Referencia', value: `\`${id}\``, inline: true },
+    { name: 'Modalidad', value: esVoz ? 'Voz + control' : tipo, inline: true },
+    { name: 'Estado', value: '● Abierto', inline: true },
+    { name: 'Solicitante', value: `<@${memberId}>`, inline: true },
+  ];
+  if (vozId) {
+    campos.push({ name: 'Sala de voz', value: `<#${vozId}>`, inline: true });
+  }
+  campos.push({
+    name: 'Instrucciones',
+    value: esVoz
+      ? 'Unete a la sala de voz. El staff puede incorporar a terceros y archivar la conversacion de control.'
+      : 'Describe tu caso con claridad. El personal de Soporte o Administracion tomara el hilo.',
+    inline: false,
+  });
+
+  return embedBase({
+    color: COLORES.institucional,
+    author: { name: MARCA.nombre, iconURL: icon || undefined },
+    titulo: esVoz ? 'Ticket de voz abierto' : 'Ticket abierto',
+    descripcion: `*${MARCA.lema}*`,
+    campos,
+    thumbnail: icon || undefined,
+    footer: 'Mesa de Asistencia',
+    footerIcon: icon || undefined,
+  });
+}
+
+async function crearTicketTexto(guild, member, tipo, client) {
   asegurarTabla();
   const db = getDb();
   const id = nextId('TKT');
@@ -130,7 +221,6 @@ async function crearTicketTexto(guild, member, tipo) {
     },
   ];
 
-  // Staff: roles con ManageChannels ya ven por jerarquia; añadir bot
   if (guild.members.me) {
     overwrites.push({
       id: guild.members.me.id,
@@ -151,7 +241,6 @@ async function crearTicketTexto(guild, member, tipo) {
     reason: `Aegis · ticket ${id}`,
   });
 
-  // Permitir ver a staff (ManageChannels / Admin)
   for (const [, rol] of guild.roles.cache) {
     if (rol.managed || rol.id === guild.id) continue;
     if (
@@ -176,32 +265,19 @@ async function crearTicketTexto(guild, member, tipo) {
 
   await canal.send({
     content: `<@${member.id}>`,
-    embeds: [
-      embedBase({
-        color: COLORES.cupula,
-        titulo: `Ticket ${id}`,
-        campos: [
-          { name: 'Tipo', value: tipo, inline: true },
-          { name: 'Autor', value: `<@${member.id}>`, inline: true },
-          { name: 'Estado', value: 'Abierto', inline: true },
-        ],
-        descripcion: 'El personal de soporte atendera esta solicitud. Usa los controles solo si eres staff.',
-        footer: 'Tickets',
-      }),
-    ],
-    components: controlesTicket(id),
+    embeds: [embedAperturaTicket({ id, tipo, memberId: member.id, client, guild })],
+    components: controlesTicket(id, { client, guild }),
   });
 
   return { id, canal };
 }
 
-async function crearTicketVoz(guild, member) {
+async function crearTicketVoz(guild, member, client) {
   asegurarTabla();
   const db = getDb();
   const id = nextId('TKT');
   const cat = await asegurarCategoriaTickets(guild);
 
-  // Canal de texto de control + voz
   const texto = await guild.channels.create({
     name: `︱🎫・voz-${id.toLowerCase()}`,
     type: ChannelType.GuildText,
@@ -267,19 +343,10 @@ async function crearTicketVoz(guild, member) {
 
   await texto.send({
     content: `<@${member.id}>`,
-    embeds: [
-      embedBase({
-        color: COLORES.cupula,
-        titulo: `Ticket de voz ${id}`,
-        campos: [
-          { name: 'Sala de voz', value: `<#${voz.id}>`, inline: true },
-          { name: 'Autor', value: `<@${member.id}>`, inline: true },
-        ],
-        descripcion: 'Unete a la sala de voz. El staff puede agregar personas y transcribir el canal de control.',
-        footer: 'Tickets',
-      }),
-    ],
-    components: controlesTicket(id),
+    embeds: [embedAperturaTicket({
+      id, tipo: 'voz', memberId: member.id, vozId: voz.id, client, guild,
+    })],
+    components: controlesTicket(id, { client, guild }),
   });
 
   return { id, canal: texto, voz };
@@ -316,13 +383,16 @@ async function agregarPersona(guild, ticketId, userId, actor) {
   });
 
   if (texto) {
+    const icon = iconoInstitucional(null, guild);
     await texto.send({
       embeds: [
         embedBase({
           color: COLORES.medicina,
-          titulo: 'Persona agregada',
-          descripcion: `<@${userId}> fue agregado al ticket por ${actorTexto(actor)}.`,
-          footer: 'Tickets',
+          author: { name: MARCA.nombre, iconURL: icon || undefined },
+          titulo: 'Acceso concedido',
+          descripcion: `<@${userId}> ha sido incorporado a este expediente por ${actorTexto(actor)}.`,
+          footer: 'Mesa de Asistencia',
+          footerIcon: icon || undefined,
         }),
       ],
     }).catch(() => {});
@@ -362,30 +432,32 @@ async function enviarTranscripcion(guild, ticket, transcripcion, actor) {
   const log = await guild.channels.fetch(canalLogId).catch(() => null);
   if (!log || !log.isTextBased()) return null;
 
+  const icon = iconoInstitucional(null, guild);
   const header =
-    `Ticket **${ticket.id}** · tipo ${ticket.tipo}\n` +
-    `Autor: <@${ticket.autor_id}>\n` +
-    `Cerrado/transcrito por: ${actorTexto(actor)}\n\n`;
+    `**Expediente** \`${ticket.id}\` · ${ticket.tipo}\n` +
+    `**Solicitante:** <@${ticket.autor_id}>\n` +
+    `**Archivado por:** ${actorTexto(actor)}\n\n`;
 
   const cuerpo = truncar(header + '```\n' + transcripcion + '\n```', 3900);
 
   await log.send({
     embeds: [
       embedBase({
-        color: COLORES.neutral,
-        titulo: `Transcripcion · ${ticket.id}`,
+        color: COLORES.institucional,
+        author: { name: MARCA.nombre, iconURL: icon || undefined },
+        titulo: `Archivo de ticket · ${ticket.id}`,
         descripcion: cuerpo,
-        footer: 'Tickets',
+        footer: 'Mesa de Asistencia · Archivo',
+        footerIcon: icon || undefined,
       }),
     ],
   });
 
-  // Si es muy larga, adjuntar como archivo
   if (transcripcion.length > 3500) {
     const { AttachmentBuilder } = require('discord.js');
     const buf = Buffer.from(transcripcion, 'utf8');
     await log.send({
-      content: `Archivo completo · ${ticket.id}`,
+      content: `Transcripcion completa · ${ticket.id}`,
       files: [new AttachmentBuilder(buf, { name: `${ticket.id}.txt` })],
     }).catch(() => {});
   }
@@ -418,16 +490,22 @@ async function transcribir(guild, ticketId, actor, { cerrar = false } = {}) {
       if (voz) await voz.delete('Aegis · cierre de ticket').catch(() => {});
     }
     if (canal) {
+      const icon = iconoInstitucional(null, guild);
       setTimeout(() => {
         canal.delete('Aegis · cierre de ticket').catch(() => {});
-      }, 4000);
+      }, 5000);
       await canal.send({
         embeds: [
           embedBase({
             color: COLORES.denegado,
-            titulo: 'Ticket cerrado',
-            descripcion: `Cerrado por ${actorTexto(actor)}. Transcripcion enviada a logs. Este canal se eliminara en breve.`,
-            footer: 'Tickets',
+            author: { name: MARCA.nombre, iconURL: icon || undefined },
+            titulo: 'Expediente cerrado',
+            descripcion:
+              `Cerrado por ${actorTexto(actor)}.\n` +
+              'La transcripcion fue enviada al archivo de mando.\n' +
+              'Este canal se eliminara en unos segundos.',
+            footer: 'Mesa de Asistencia',
+            footerIcon: icon || undefined,
           }),
         ],
         components: [],
@@ -454,4 +532,5 @@ module.exports = {
   agregarPersona,
   transcribir,
   setConfig,
+  iconoInstitucional,
 };
