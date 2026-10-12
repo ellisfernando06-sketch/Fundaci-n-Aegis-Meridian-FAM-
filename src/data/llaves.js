@@ -1,7 +1,6 @@
 /**
  * Catálogo inicial de llaves de acceso de la Fundación Aegis-Meridian
- * Se carga en la base de datos en la primera ejecución.
- * A partir de ahí, la base de datos manda y /config_llaves es la forma de cambiarla.
+ * Se sincroniza en la base de datos en cada arranque (upsert por id).
  */
 
 const LLAVES_CARGO = [
@@ -117,13 +116,23 @@ const LLAVES_CARGO = [
   },
   {
     id: 'KEY-SEG-03',
-    nombre: 'Llave de Comando',
-    funcion: 'Abre el centro de comando de seguridad y los planes de defensa',
+    nombre: 'Llave de Comando de Seguridad',
+    funcion: 'Abre el centro de comando de seguridad y los planes de defensa del sitio',
     tipo: 'cargo',
     rama: 'seguridad',
     alcance: 'Dirección',
     nivelMin: 2,
-    otorgan: null,
+    otorgan: ['SEG.COMANDANTE'],
+  },
+  {
+    id: 'KEY-SEG-04',
+    nombre: 'Llave de Dirección de Operaciones de Seguridad',
+    funcion: 'Acceso ejecutivo del Director de Operaciones de Seguridad de F.A.M: comando, planes de defensa, armería y sala de control',
+    tipo: 'cargo',
+    rama: 'seguridad',
+    alcance: 'Dirección',
+    nivelMin: 1,
+    otorgan: ['SEG.COMANDANTE', 'DIR.GENERAL', 'ST.FUNDADOR'],
   },
   {
     id: 'KEY-FTM-01',
@@ -138,7 +147,7 @@ const LLAVES_CARGO = [
   {
     id: 'KEY-FTM-02',
     nombre: 'Llave de Mando Táctico',
-    funcion: 'Abre la sala de planeación y las órdenes de misión de la FTM',
+    funcion: 'Abre el mando de la FTM y la planificación de operaciones especiales',
     tipo: 'cargo',
     rama: 'ftm',
     alcance: 'Mando',
@@ -148,7 +157,7 @@ const LLAVES_CARGO = [
   {
     id: 'KEY-ERR-01',
     nombre: 'Llave de Respuesta',
-    funcion: 'Abre el cuartel del ERR y su canal de despliegue',
+    funcion: 'Abre el área de respuesta rápida y su canal de despliegue',
     tipo: 'cargo',
     rama: 'err',
     alcance: 'Base',
@@ -158,7 +167,7 @@ const LLAVES_CARGO = [
   {
     id: 'KEY-ERR-02',
     nombre: 'Llave de Mando de Respuesta',
-    funcion: 'Abre la sala de planeación y coordinación del ERR',
+    funcion: 'Abre el mando de respuesta rápida y la coordinación de crisis',
     tipo: 'cargo',
     rama: 'err',
     alcance: 'Mando',
@@ -168,7 +177,7 @@ const LLAVES_CARGO = [
   {
     id: 'KEY-INT-01',
     nombre: 'Llave de Archivo de Inteligencia',
-    funcion: 'Abre el archivo y las salas de análisis de Inteligencia',
+    funcion: 'Abre el archivo de inteligencia y registros de vigilancia',
     tipo: 'cargo',
     rama: 'inteligencia',
     alcance: 'Base',
@@ -178,7 +187,7 @@ const LLAVES_CARGO = [
   {
     id: 'KEY-INT-02',
     nombre: 'Llave de Operaciones de Inteligencia',
-    funcion: 'Abre la sala de operaciones y los informes de campo',
+    funcion: 'Abre operaciones de campo de inteligencia y salas de análisis',
     tipo: 'cargo',
     rama: 'inteligencia',
     alcance: 'Mando',
@@ -188,7 +197,7 @@ const LLAVES_CARGO = [
   {
     id: 'KEY-INT-03',
     nombre: 'Llave de Gerencia de Inteligencia',
-    funcion: 'Abre la oficina de la gerencia y los informes reservados',
+    funcion: 'Abre la gerencia de inteligencia y reportes clasificados',
     tipo: 'cargo',
     rama: 'inteligencia',
     alcance: 'Dirección',
@@ -198,7 +207,7 @@ const LLAVES_CARGO = [
   {
     id: 'KEY-SI-01',
     nombre: 'Llave de Auditoría',
-    funcion: 'Abre la oficina de auditoría y los registros de revisión interna',
+    funcion: 'Abre canales de auditoría y revisiones de personal',
     tipo: 'cargo',
     rama: 'seguridad_interna',
     alcance: 'Base',
@@ -208,7 +217,7 @@ const LLAVES_CARGO = [
   {
     id: 'KEY-SI-02',
     nombre: 'Llave de Expedientes Internos',
-    funcion: 'Abre los expedientes de casos internos y su evidencia',
+    funcion: 'Abre expedientes internos y salas de investigación de SI',
     tipo: 'cargo',
     rama: 'seguridad_interna',
     alcance: 'Mando',
@@ -218,7 +227,7 @@ const LLAVES_CARGO = [
   {
     id: 'KEY-SI-03',
     nombre: 'Llave de Gerencia de Seguridad Interna',
-    funcion: 'Abre la oficina de la gerencia y todos los casos abiertos',
+    funcion: 'Abre la gerencia de SI y el control disciplinario',
     tipo: 'cargo',
     rama: 'seguridad_interna',
     alcance: 'Dirección',
@@ -228,7 +237,7 @@ const LLAVES_CARGO = [
   {
     id: 'KEY-CAOS-01',
     nombre: 'Pase Insurgente',
-    funcion: 'Abre el canal general y las zonas de la Insurgencia',
+    funcion: 'Acceso a zonas de la Insurgencia del Caos (facción enemiga)',
     tipo: 'cargo',
     rama: 'insurgencia',
     alcance: 'Base',
@@ -238,7 +247,7 @@ const LLAVES_CARGO = [
   {
     id: 'KEY-CAOS-02',
     nombre: 'Pase de Mando Insurgente',
-    funcion: 'Abre el canal de mando y la planeación de operaciones de la Insurgencia',
+    funcion: 'Acceso de mando de la Insurgencia del Caos',
     tipo: 'cargo',
     rama: 'insurgencia',
     alcance: 'Mando',
@@ -256,7 +265,7 @@ const LLAVES_ESPECIALES = [
     rama: null,
     alcance: null,
     nivelMin: 4,
-    otorgan: ['INV.DIRECTOR_INVESTIGACION', 'SEG.COMANDANTE'],
+    otorgan: ['INV.DIRECTOR', 'SEG.COMANDANTE'],
   },
   {
     id: 'KEY-ESP-02',
@@ -276,7 +285,7 @@ const LLAVES_ESPECIALES = [
     rama: null,
     alcance: null,
     nivelMin: 3,
-    otorgan: ['INV.DIRECTOR_INVESTIGACION'],
+    otorgan: ['INV.DIRECTOR'],
   },
   {
     id: 'KEY-ESP-04',
@@ -286,7 +295,7 @@ const LLAVES_ESPECIALES = [
     rama: null,
     alcance: null,
     nivelMin: 4,
-    otorgan: ['CUP.DIRECTOR_GENERAL'],
+    otorgan: ['DIR.GENERAL'],
   },
   {
     id: 'KEY-ESP-05',
@@ -296,7 +305,7 @@ const LLAVES_ESPECIALES = [
     rama: null,
     alcance: null,
     nivelMin: 3,
-    otorgan: ['MED.DIRECTOR_MEDICO'],
+    otorgan: ['MED.DIRECTOR'],
   },
   {
     id: 'KEY-ESP-06',
@@ -306,7 +315,7 @@ const LLAVES_ESPECIALES = [
     rama: null,
     alcance: null,
     nivelMin: 3,
-    otorgan: ['SEG.COMANDANTE', 'CUP.DIRECTOR_GENERAL'],
+    otorgan: ['SEG.COMANDANTE', 'DIR.GENERAL'],
   },
   {
     id: 'KEY-ESP-07',
@@ -316,7 +325,7 @@ const LLAVES_ESPECIALES = [
     rama: null,
     alcance: null,
     nivelMin: 4,
-    otorgan: ['INV.DIRECTOR_INVESTIGACION'],
+    otorgan: ['INV.DIRECTOR'],
   },
   {
     id: 'KEY-ESP-08',
@@ -326,7 +335,7 @@ const LLAVES_ESPECIALES = [
     rama: null,
     alcance: null,
     nivelMin: 3,
-    otorgan: ['SEG.COMANDANTE', 'INV.DIRECTOR_INVESTIGACION'],
+    otorgan: ['SEG.COMANDANTE', 'INV.DIRECTOR'],
   },
   {
     id: 'KEY-ESP-09',
@@ -336,7 +345,7 @@ const LLAVES_ESPECIALES = [
     rama: null,
     alcance: null,
     nivelMin: 3,
-    otorgan: ['SI.GERENTE_SI', 'INT.GERENTE_INTELIGENCIA'],
+    otorgan: ['SI.GERENTE', 'INT.GERENTE'],
   },
 ];
 
