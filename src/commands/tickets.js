@@ -8,22 +8,23 @@ const {
   panelEmbed,
   panelBotones,
   asegurarTabla,
+  iconoInstitucional,
 } = require('../services/tickets');
-const { setConfig, getConfig } = require('../db');
-const { embedBase, COLORES } = require('../utils/plantillas');
+const { setConfig } = require('../db');
+const { embedBase, COLORES, MARCA } = require('../utils/plantillas');
 const { actorTexto } = require('../services/solicitudes');
 
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('tickets')
-    .setDescription('Panel de tickets y configuracion')
+    .setDescription('Mesa de Asistencia · panel y configuracion')
     .addSubcommand((s) =>
       s.setName('panel')
-        .setDescription('Publica el panel de tickets en este canal')
+        .setDescription('Publica el panel institucional de tickets en este canal')
     )
     .addSubcommand((s) =>
       s.setName('config_logs')
-        .setDescription('Define el canal donde se envian las transcripciones')
+        .setDescription('Canal de archivo de transcripciones')
         .addChannelOption((o) =>
           o.setName('canal')
             .setDescription('Canal de logs de tickets')
@@ -45,17 +46,23 @@ module.exports = {
         return;
       }
 
+      const ctx = { client: interaction.client, guild: interaction.guild };
       await interaction.channel.send({
-        embeds: [panelEmbed()],
+        embeds: [panelEmbed(ctx)],
         components: [panelBotones()],
       });
 
+      const icon = iconoInstitucional(interaction.client, interaction.guild);
       await interaction.reply({
         embeds: [embedBase({
-          color: COLORES.medicina,
+          color: COLORES.institucional,
+          author: { name: MARCA.nombre, iconURL: icon || undefined },
           titulo: 'Panel publicado',
-          descripcion: `Panel de tickets en <#${interaction.channel.id}>.\n\n**Publicado por:** ${actorTexto(interaction.user)}`,
-          footer: 'Tickets',
+          descripcion:
+            `La **Mesa de Asistencia** quedo activa en <#${interaction.channel.id}>.\n\n` +
+            `**Publicado por:** ${actorTexto(interaction.user)}`,
+          footer: 'Mesa de Asistencia',
+          footerIcon: icon || undefined,
         })],
         flags: MessageFlags.Ephemeral,
       });
@@ -72,15 +79,18 @@ module.exports = {
       }
       const canal = interaction.options.getChannel('canal');
       setConfig('canal_log_tickets', canal.id);
+      const icon = iconoInstitucional(interaction.client, interaction.guild);
       await interaction.reply({
         embeds: [embedBase({
-          color: COLORES.medicina,
-          titulo: 'Logs de tickets configurados',
+          color: COLORES.institucional,
+          author: { name: MARCA.nombre, iconURL: icon || undefined },
+          titulo: 'Archivo de tickets configurado',
           campos: [
             { name: 'Canal', value: `<#${canal.id}>`, inline: true },
             { name: 'Configurado por', value: actorTexto(interaction.user), inline: true },
           ],
-          footer: 'Tickets',
+          footer: 'Mesa de Asistencia',
+          footerIcon: icon || undefined,
         })],
         flags: MessageFlags.Ephemeral,
       });
