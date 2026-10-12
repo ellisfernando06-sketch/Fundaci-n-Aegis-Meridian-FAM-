@@ -1,6 +1,7 @@
 /**
  * Tienda interna · impuestos · multas
- * Moneda: creditos Aegis (₡)
+ * Moneda: créditos Aegis (₡)
+ * Economato · Fundación Aegis-Meridian
  */
 
 const {
@@ -21,12 +22,12 @@ const {
   formatear,
   esFundador,
 } = require('./finanzas');
-const { embedBase, COLORES } = require('../utils/plantillas');
+const { embedBase, COLORES, MARCA, logoUrl } = require('../utils/plantillas');
 const { sanitizar, truncar } = require('../utils/helpers');
 const auditoria = require('./auditoria');
 const { actorTexto } = require('./solicitudes');
 
-/** Multas sugeridas por tipo de sancion */
+/** Multas sugeridas por tipo de sanción */
 const MULTAS_POR_TIPO = {
   'Amonestacion verbal': 25,
   'Amonestacion escrita': 75,
@@ -57,7 +58,6 @@ function asegurarTienda() {
       creado_en TEXT DEFAULT (datetime('now'))
     );
   `);
-  // Impuesto por defecto 5% si no existe
   if (getConfig('fin_impuesto_pct') == null) setConfig('fin_impuesto_pct', '5');
 }
 
@@ -72,10 +72,6 @@ function setImpuestoPct(pct, actorTag) {
   auditoria.registrar('system', 'FIN.IMPUESTO', { pct, actor: actorTag });
 }
 
-/**
- * Debito inmediato (multa / compra / impuesto).
- * Si saldo insuficiente, deja saldo en 0 y registra deuda parcial en concepto.
- */
 function debitar(discordId, monto, concepto, autorizadoPor) {
   asegurarTienda();
   const m = Math.abs(Number(monto) || 0);
@@ -97,7 +93,6 @@ function debitar(discordId, monto, concepto, autorizadoPor) {
     firmaEstado: 'n/a',
   });
 
-  // Corregir saldo_despues
   getDb().prepare('UPDATE finanzas_movimientos SET saldo_despues = ? WHERE id = ?').run(saldo, id);
 
   return { cobrado, faltante, saldo, movId: id };
@@ -107,7 +102,6 @@ function aplicarMultaPorSancion(discordId, tipoSancion, sancionId, actorTag) {
   asegurarTienda();
   const base = MULTAS_POR_TIPO[tipoSancion] ?? 50;
   const pct = getImpuestoPct();
-  // La multa es fija; el "impuesto" institucional se suma como recargo de tramitacion
   const recargo = Math.round((base * pct) / 100 * 100) / 100;
   const total = base + recargo;
 
@@ -150,7 +144,7 @@ function comprarItem(discordId, itemId) {
   asegurarTienda();
   const db = getDb();
   const item = db.prepare('SELECT * FROM tienda_items WHERE id = ? AND activo = 1').get(itemId);
-  if (!item) throw new Error('Articulo no disponible');
+  if (!item) throw new Error('Artículo no disponible');
   if (item.stock === 0) throw new Error('Sin stock');
 
   const saldo = obtenerSaldo(discordId);
@@ -171,22 +165,28 @@ function comprarItem(discordId, itemId) {
   return { item, compraId, ...r };
 }
 
-function embedCatalogo(items) {
+function embedCatalogo(items, ctx = {}) {
+  const icon = logoUrl(ctx.client, ctx.guild);
   const desc = items.length
     ? items.map((i) => {
       const stock = i.stock < 0 ? '∞' : String(i.stock);
       return `**${i.id}** · ${i.nombre} — **${formatear(i.precio)}** · stock ${stock}\n_${truncar(i.descripcion || '—', 80)}_`;
     }).join('\n\n')
-    : '_Catalogo vacio._';
+    : '_Catálogo vacío._';
 
   return embedBase({
-    color: 0xc9a227,
-    titulo: '▣ Economato · Tienda interna F.A.M.',
+    color: COLORES.oro,
+    author: { name: `${MARCA.nombre} · ${MARCA.corto}`, iconURL: icon || undefined },
+    titulo: `▣ ${MARCA.economato}`,
     descripcion:
-      'Adquiere articulos con **creditos Aegis**.\n' +
+      `*${MARCA.lema}*\n\n` +
+      'Adquiere artículos con **créditos Aegis**.\n' +
       `Impuesto/recargo institucional vigente: **${getImpuestoPct()}%** (aplicado en multas).\n\n` +
-      truncar(desc, 3500),
-    footer: 'Economato',
+      '─────────────────────────────\n\n' +
+      truncar(desc, 3200),
+    thumbnail: icon || undefined,
+    footer: MARCA.economato,
+    footerIcon: icon || undefined,
   });
 }
 
@@ -197,7 +197,7 @@ function botonesCatalogo(items) {
       new ActionRowBuilder().addComponents(
         new StringSelectMenuBuilder()
           .setCustomId('tienda:comprar')
-          .setPlaceholder('Selecciona un articulo para comprar')
+          .setPlaceholder('Selecciona un artículo para comprar')
           .addOptions(
             items.slice(0, 25).map((i) => ({
               label: `${i.nombre}`.slice(0, 100),
@@ -210,14 +210,14 @@ function botonesCatalogo(items) {
   }
   rows.push(
     new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('tienda:refrescar').setLabel('Actualizar catalogo').setStyle(ButtonStyle.Secondary)
+      new ButtonBuilder().setCustomId('tienda:refrescar').setLabel('Actualizar catálogo').setStyle(ButtonStyle.Secondary)
     )
   );
   return rows;
 }
 
 function modalNuevoItem() {
-  const modal = new ModalBuilder().setCustomId('tienda:modal_item').setTitle('Nuevo articulo');
+  const modal = new ModalBuilder().setCustomId('tienda:modal_item').setTitle('Nuevo artículo');
   modal.addComponents(
     new ActionRowBuilder().addComponents(
       new TextInputBuilder().setCustomId('nombre').setLabel('Nombre').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(80)
@@ -229,7 +229,7 @@ function modalNuevoItem() {
       new TextInputBuilder().setCustomId('stock').setLabel('Stock (-1 = ilimitado)').setStyle(TextInputStyle.Short).setRequired(true).setValue('-1').setMaxLength(6)
     ),
     new ActionRowBuilder().addComponents(
-      new TextInputBuilder().setCustomId('descripcion').setLabel('Descripcion').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(200)
+      new TextInputBuilder().setCustomId('descripcion').setLabel('Descripción').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(200)
     ),
   );
   return modal;
