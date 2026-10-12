@@ -28,6 +28,25 @@ const INTERVALOS = [
   { value: '0', label: 'Solo manual (sin automatico)' },
 ];
 
+/** Discord permite max 25 opciones por select. */
+const OPCIONES_POR_PAGINA = 25;
+
+/**
+ * Cargos elegibles para escala salarial:
+ * toda la Fundación + staff (moderación, soporte, cúpula, direcciones, facciones).
+ * Excluye solo Insurgencia del Caos (facción enemiga).
+ */
+function listarCargosParaSalario() {
+  return getTodosCargos()
+    .filter((c) => {
+      const key = String(c.key || '');
+      const rama = String(c.rama || '');
+      if (key.startsWith('CAOS.') || rama === 'insurgencia') return false;
+      return true;
+    })
+    .sort((a, b) => (a.orden || 999) - (b.orden || 999));
+}
+
 function asegurarTablas() {
   const db = getDb();
   db.exec(`
@@ -142,15 +161,16 @@ function upsertSalario(cargoKey, monto, intervaloDias, actorTag) {
   `).run(cargoKey, monto, intervaloDias, actorTag);
 }
 
-/** Panel principal del fundador */
 function embedPanelControl(ctx = {}) {
   const icon = logoUrl(ctx.client, ctx.guild);
   const salarios = listarSalarios().filter((s) => s.activo && s.monto > 0);
+  const totalCargos = listarCargosParaSalario().length;
   const lineas = salarios.length
-    ? salarios.slice(0, 20).map((s) => {
+    ? salarios.slice(0, 25).map((s) => {
       const nombre = s.cargo.nombre || s.cargo_key;
+      const rama = s.cargo.nombreRama ? ` · ${s.cargo.nombreRama}` : '';
       const intv = s.intervalo_dias > 0 ? `cada ${s.intervalo_dias}d` : 'manual';
-      return `· **${nombre}** — ${formatear(s.monto)} · ${intv}`;
+      return `· **${nombre}**${rama} — ${formatear(s.monto)} · ${intv}`;
     }).join('\n')
     : '_Sin salarios configurados._';
 
@@ -166,6 +186,7 @@ function embedPanelControl(ctx = {}) {
       `*${MARCA.lema}*\n\n` +
       'Control institucional de **créditos Aegis**.\n' +
       'Solo el **Fundador** autoriza movimientos de caja y nóminas manuales.\n\n' +
+      `Cargos disponibles en escala: **${totalCargos}** (Fundación, staff, direcciones y facciones).\n` +
       '─────────────────────────────',
     campos: [
       {
@@ -177,14 +198,14 @@ function embedPanelControl(ctx = {}) {
         inline: false,
       },
       {
-        name: '╭─  Escala salarial',
+        name: `╭─  Escala salarial (${salarios.length} configurados)`,
         value: truncar(lineas, 1000),
         inline: false,
       },
       {
         name: '╭─  Operaciones disponibles',
         value:
-          '**Configurar salario** — monto e intervalo por cargo\n' +
+          '**Configurar salario** — todos los cargos (páginas)\n' +
           '**Pago manual** — transferencia individual con firma en DM\n' +
           '**Procesar nómina** — genera pendientes según escala\n' +
           '**Libro mayor** — últimos movimientos',
@@ -211,22 +232,83 @@ function botonesPanel() {
   ];
 }
 
-function menuCargosSalario() {
-  const cargos = getTodosCargos()
-    .filter((c) => !String(c.key).startsWith('CAOS.'))
-    .slice(0, 25);
-  return new ActionRowBuilder().addComponents(
-    new StringSelectMenuBuilder()
-      .setCustomId('finanzas:sel_cargo')
-      .setPlaceholder('Selecciona el cargo a remunerar')
-      .addOptions(
-        cargos.map((c) => ({
-          label: String(c.nombre).slice(0, 100),
-          value: c.key,
-          description: String(c.nombreRama || c.rama || '').slice(0, 100),
-        }))
-      ),
-  );
+/**
+ * Menú de cargos con paginación (25 por página = límite Discord).
+ * Incluye Fundación, Moderación, Soporte, Cúpula, Direcciones y facciones.
+ */
+function menuCargosSalario(pagina = 0) {
+  const todos = listarCargosParaSalario();
+  const totalPaginas = Math.max(1, Math.ceil(todos.length / OPCIONES_POR_PAGINA));
+  const p = Math.min(Math.max(0, Number(pagina) || 0), totalPaginas - 1);
+  const slice = todos.slice(p * OPCIONES_POR_PAGINA, (p + 1) * OPCIONES_POR_PAGINA);
+
+  const select = new StringSelectMenuBuilder()
+    .setCustomId(`finanzas:sel_cargo:${p}`)
+    .setPlaceholder(`Cargos · página ${p + 1}/${totalPaginas} (${todos.length} total)`)
+    .addOptions(
+      slice.map((c) => ({
+        label: String(c.nombre).slice(0, 100),
+        value: c.key,
+        description: String(c.nombreRama || c.rama || c.key).slice(0, 100),
+      }))
+    );
+
+  const rows = [new ActionRowBuilder().addComponents(select)];
+
+  if (totalPaginas > 1) {
+    const nav = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`finanzas:cfg_pagina:${p - 1}`)
+        .setLabel('◀ Anterior')
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(p <= 0),
+      new ButtonBuilder()
+        .setCustomId('finanzas:cfg_pagina_info')
+        .setLabel(`${p + 1} / ${totalPaginas}`)
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(true),
+      new ButtonBuilder()
+        .setCustomId(`finanzas:cfg_pagina:${p + 1}`)
+        .setLabel('Siguiente ▶')
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(p >= totalPaginas - 1),
+    );
+    rows.push(nav);
+  }
+
+  return rows;
+}
+
+function embedCfgSalario(pagina = 0) {
+  const todos = listarCargosParaSalario();
+  const totalPaginas = Math.max(1, Math.ceil(todos.length / OPCIONES_POR_PAGINA));
+  const p = Math.min(Math.max(0, Number(pagina) || 0), totalPaginas - 1);
+
+  const porRama = {};
+  for (const c of todos) {
+    const r = c.nombreRama || c.rama || 'Otros';
+    porRama[r] = (porRama[r] || 0) + 1;
+  }
+  const resumenRamas = Object.entries(porRama)
+    .map(([k, v]) => `· ${k}: **${v}**`)
+    .join('\n');
+
+  return embedBase({
+    color: COLORES.finanzas,
+    titulo: 'Configurar salario por cargo',
+    descripcion:
+      'Selecciona el cargo de la **Fundación** o del **staff**.\n' +
+      'Luego indicarás **monto** e **intervalo en días**.\n\n' +
+      `Total cargos: **${todos.length}** · Página **${p + 1}/${totalPaginas}**`,
+    campos: [
+      {
+        name: 'Ramas incluidas',
+        value: truncar(resumenRamas || '—', 900),
+        inline: false,
+      },
+    ],
+    footer: 'Finanzas · Escala salarial',
+  });
 }
 
 function modalSalario(cargoKey) {
@@ -291,9 +373,6 @@ function modalPagoManual() {
   return modal;
 }
 
-/**
- * Crea pendiente y envia DM con botones de firma.
- */
 async function emitirTransferencia({ client, guild, beneficiarioId, monto, concepto, autorizadoPor }) {
   asegurarTablas();
   const id = nextId('TRF');
@@ -437,10 +516,12 @@ module.exports = {
   ajustarSaldo,
   registrarMovimiento,
   listarSalarios,
+  listarCargosParaSalario,
   upsertSalario,
   embedPanelControl,
   botonesPanel,
   menuCargosSalario,
+  embedCfgSalario,
   modalSalario,
   modalPagoManual,
   emitirTransferencia,
