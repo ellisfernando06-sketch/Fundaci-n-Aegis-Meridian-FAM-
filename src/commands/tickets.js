@@ -49,7 +49,7 @@ module.exports = {
       const ctx = { client: interaction.client, guild: interaction.guild };
       await interaction.channel.send({
         embeds: [panelEmbed(ctx)],
-        components: [panelBotones()],
+        components: panelBotones(),
       });
 
       const icon = iconoInstitucional(interaction.client, interaction.guild);
@@ -59,9 +59,9 @@ module.exports = {
           author: { name: MARCA.nombre, iconURL: icon || undefined },
           titulo: 'Panel publicado',
           descripcion:
-            `La **Mesa de Asistencia** quedo activa en <#${interaction.channel.id}>.\n\n` +
+            `La **Mesa de Asistencia** quedó activa en <#${interaction.channel.id}>.\n\n` +
             `**Publicado por:** ${actorTexto(interaction.user)}`,
-          footer: 'Mesa de Asistencia',
+          footer: MARCA.division,
           footerIcon: icon || undefined,
         })],
         flags: MessageFlags.Ephemeral,
@@ -89,7 +89,7 @@ module.exports = {
             { name: 'Canal', value: `<#${canal.id}>`, inline: true },
             { name: 'Configurado por', value: actorTexto(interaction.user), inline: true },
           ],
-          footer: 'Mesa de Asistencia',
+          footer: MARCA.division,
           footerIcon: icon || undefined,
         })],
         flags: MessageFlags.Ephemeral,
