@@ -5,11 +5,12 @@
  *
  * Orden visual:
  *   FUNDACION → (solo fundadores)
- *   DIRECCIONES → directores, gerentes, comandante seguridad
+ *   DIRECCIONES → directores de F.A.M, gerentes
  *   MODERACION → admin jefe, senior, en prueba
  *   SOPORTE → soporte tecnico
  *   CUPULA → consejo
  *   SI / SEG / MED / INV / INT / CD / CAOS / PERMISOS
+ *   En facciones: mandan jefes y subcomandantes (sin subdirectores ni subgerentes)
  */
 
 const FORMATO = (prefijo, nombre) => `${prefijo} ●┇${nombre}`;
@@ -97,10 +98,16 @@ const ORGANIGRAMA = {
       },
       {
         key: 'DIR.GENERAL',
-        nombre: 'Director General',
+        nombre: 'Director General de F.A.M',
         orden: 22,
         nivelMando: 1,
-        aliases: ['director general', 'dir general', 'dg'],
+        aliases: [
+          'director general de f.a.m',
+          'director general de fam',
+          'director general',
+          'dir general',
+          'dg',
+        ],
       },
       {
         key: 'INT.GERENTE',
@@ -111,24 +118,42 @@ const ORGANIGRAMA = {
       },
       {
         key: 'SEG.COMANDANTE',
-        nombre: 'Comandante de Seguridad',
+        nombre: 'Director de Operaciones de Seguridad de F.A.M',
         orden: 24,
         nivelMando: 2,
-        aliases: ['comandante de seguridad', 'comandante seguridad'],
+        aliases: [
+          'director de operaciones de seguridad de f.a.m',
+          'director de operaciones de seguridad de fam',
+          'director de operaciones de seguridad',
+          'director de operaciones',
+          'comandante de seguridad',
+          'comandante seguridad',
+        ],
       },
       {
         key: 'MED.DIRECTOR',
-        nombre: 'Director Medico',
+        nombre: 'Director Medico de F.A.M',
         orden: 25,
         nivelMando: 2,
-        aliases: ['director medico', 'director médico', 'dir medico', 'director de medicina'],
+        aliases: [
+          'director medico de f.a.m',
+          'director medico de fam',
+          'director médico de f.a.m',
+          'director medico',
+          'director médico',
+          'dir medico',
+          'director de medicina',
+        ],
       },
       {
         key: 'INV.DIRECTOR',
-        nombre: 'Director de Investigacion Cientifica',
+        nombre: 'Director de Investigacion Cientifica de F.A.M',
         orden: 26,
         nivelMando: 2,
         aliases: [
+          'director de investigacion cientifica de f.a.m',
+          'director de investigacion cientifica de fam',
+          'director de investigación científica de f.a.m',
           'director de investigacion cientifica',
           'director de investigación científica',
           'director de investigacion',
