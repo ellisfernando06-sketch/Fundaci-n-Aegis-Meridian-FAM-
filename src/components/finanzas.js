@@ -1,10 +1,11 @@
-const { MessageFlags, PermissionFlagsBits } = require('discord.js');
+const { MessageFlags } = require('discord.js');
 const {
   asegurarTablas,
   esFundador,
   embedPanelControl,
   botonesPanel,
   menuCargosSalario,
+  embedCfgSalario,
   modalSalario,
   modalPagoManual,
   upsertSalario,
@@ -13,7 +14,6 @@ const {
   procesarNomina,
   ultimosMovimientos,
   formatear,
-  obtenerSaldo,
 } = require('../services/finanzas');
 const { embedBase, COLORES } = require('../utils/plantillas');
 const { actorTexto } = require('../services/solicitudes');
@@ -31,7 +31,11 @@ async function handle(interaction, accion, args) {
 
   switch (accion) {
     case 'cfg_salario':
-      return onCfgSalario(interaction);
+      return onCfgSalario(interaction, 0);
+    case 'cfg_pagina':
+      return onCfgSalario(interaction, parseInt(args[0], 10) || 0, true);
+    case 'cfg_pagina_info':
+      return interaction.deferUpdate().catch(() => {});
     case 'sel_cargo':
       return onSelCargo(interaction);
     case 'modal_salario':
@@ -58,7 +62,7 @@ async function handle(interaction, accion, args) {
   }
 }
 
-async function onCfgSalario(interaction) {
+async function onCfgSalario(interaction, pagina = 0, esUpdate = false) {
   if (!soloFundador(interaction)) {
     await interaction.reply({
       content: 'Solo el Fundador puede configurar la escala salarial.',
@@ -66,14 +70,21 @@ async function onCfgSalario(interaction) {
     });
     return;
   }
+
+  const payload = {
+    embeds: [embedCfgSalario(pagina)],
+    components: menuCargosSalario(pagina),
+  };
+
+  if (esUpdate) {
+    await interaction.update(payload).catch(async () => {
+      await interaction.reply({ ...payload, flags: MessageFlags.Ephemeral });
+    });
+    return;
+  }
+
   await interaction.reply({
-    embeds: [embedBase({
-      color: 0x1a1a2e,
-      titulo: 'Configurar salario por cargo',
-      descripcion: 'Selecciona el cargo. A continuacion indicaras **monto** e **intervalo en dias**.',
-      footer: 'Finanzas',
-    })],
-    components: [menuCargosSalario()],
+    ...payload,
     flags: MessageFlags.Ephemeral,
   });
 }
@@ -113,6 +124,7 @@ async function onModalSalario(interaction, cargoKey) {
       titulo: 'Escala salarial actualizada',
       campos: [
         { name: 'Cargo', value: cargo?.nombre || cargoKey, inline: true },
+        { name: 'Rama', value: cargo?.nombreRama || '—', inline: true },
         { name: 'Monto', value: formatear(monto), inline: true },
         { name: 'Intervalo', value: intervalo === 0 ? 'Solo manual' : `Cada ${intervalo} dias`, inline: true },
         { name: 'Registrado por', value: actor, inline: false },
