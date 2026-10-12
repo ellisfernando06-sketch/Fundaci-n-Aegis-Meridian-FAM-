@@ -49,6 +49,12 @@ module.exports = {
           emoji: '🔍',
         },
         {
+          label: 'Aplicar colores por faccion',
+          value: 'colores',
+          description: 'Director oscuro, faccion mismo tono mas claro',
+          emoji: '🎨',
+        },
+        {
           label: 'Ver organigrama',
           value: 'organigrama',
           description: 'Lista oficial completa',
@@ -64,6 +70,7 @@ module.exports = {
         '**Renombrar** — deja cada rol con su nombre oficial.',
         '**Ordenar** — los coloca en su seccion (Fundacion → Direcciones → …).',
         '**Eliminar (bot)** — quita solo los que creo el bot.',
+        '**Colores** — unifica color por faccion (director oscuro).',
         '',
         'Para borrar **todos** los roles editables: `/eliminar_roles`',
         'El rol del bot debe quedar **por encima** de los que gestione.',
