@@ -8,6 +8,7 @@ const { embedBase, COLORES } = require('../utils/plantillas');
 const { sanitizar, truncar } = require('../utils/helpers');
 const { aplicarSuspension, levantarSuspension } = require('../services/roles');
 const { actorTexto } = require('../services/solicitudes');
+const { aplicarMultaPorSancion, formatear } = require('../services/tienda');
 
 const TIPOS = [
   { name: 'Amonestacion verbal', value: 'Amonestacion verbal' },
@@ -134,22 +135,43 @@ module.exports = {
         }
       }
 
+      let multaInfo = null;
+      try {
+        multaInfo = aplicarMultaPorSancion(user.id, tipo, id, otorgante);
+      } catch (err) {
+        console.error('[Multa sancion]', err);
+      }
+
       auditoria.registrar(interaction.user.id, 'SANCION.APLICAR', {
         id, sancionado: user.id, tipo, incidenteId, otorgante,
+        multa: multaInfo?.total ?? null,
       });
+
+      const campos = [
+        { name: 'Miembro', value: `<@${user.id}>`, inline: true },
+        { name: 'Tipo', value: tipo, inline: true },
+        { name: 'Dias', value: dias ? String(dias) : '—', inline: true },
+        { name: 'Incidente', value: incidenteId || '—', inline: true },
+        { name: 'Emitida por', value: otorgante, inline: true },
+        { name: 'Motivo', value: truncar(motivo, 500), inline: false },
+      ];
+
+      if (multaInfo) {
+        campos.push({
+          name: 'Multa financiera',
+          value:
+            `Base ${formatear(multaInfo.base)} + recargo ${formatear(multaInfo.recargo)} = **${formatear(multaInfo.total)}**\n` +
+            `Cobrado: ${formatear(multaInfo.cobrado)}` +
+            (multaInfo.faltante > 0 ? ` · pendiente ${formatear(multaInfo.faltante)}` : ''),
+          inline: false,
+        });
+      }
 
       await interaction.editReply({
         embeds: [embedBase({
           color: COLORES.sancion,
           titulo: `${id} · Sancion aplicada`,
-          campos: [
-            { name: 'Miembro', value: `<@${user.id}>`, inline: true },
-            { name: 'Tipo', value: tipo, inline: true },
-            { name: 'Dias', value: dias ? String(dias) : '—', inline: true },
-            { name: 'Incidente', value: incidenteId || '—', inline: true },
-            { name: 'Emitida por', value: otorgante, inline: true },
-            { name: 'Motivo', value: truncar(motivo, 500), inline: false },
-          ],
+          campos,
           footer: 'Sanciones',
         })],
       });
