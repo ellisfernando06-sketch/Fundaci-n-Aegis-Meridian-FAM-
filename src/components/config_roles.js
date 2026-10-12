@@ -41,24 +41,17 @@ function guardarMapa(cargoKey, roleId, nombreRol, origen) {
   ).run(cargoKey, roleId, nombreRol, origen);
 }
 
-/** Nombre oficial del item en Discord */
 function nombreOficial(item) {
   return item.nombreRol || item.nombre || item.key;
 }
 
-/**
- * Para CREAR: solo coincide si el nombre normalizado es exactamente el oficial
- * (o el nombre base sin prefijo). Evita falsos "ya existe".
- */
 function existeExacto(rolDiscord, item) {
   const oficial = normalizarNombre(nombreOficial(item));
   const nom = normalizarNombre(rolDiscord.name);
   const base = normalizarNombre(nombreBaseRol(rolDiscord.name));
   if (!oficial) return false;
   if (nom === oficial) return true;
-  // Separadores: comparar texto del separador
   if (item.tipo === 'separador' && (nom === oficial || base === oficial)) return true;
-  // Cargo: nombre base igual al nombre del cargo (sin prefijo)
   if (item.nombre && base === normalizarNombre(item.nombre)) return true;
   return false;
 }
@@ -71,6 +64,7 @@ function escanear(guild) {
   const usados = new Set();
   const detectados = [];
   const faltantes = [];
+  const aRenombrar = [];
 
   for (const item of catalogo) {
     let match = null;
@@ -85,11 +79,20 @@ function escanear(guild) {
       detectados.push({ item, rol: match });
       usados.add(match.id);
       guardarMapa(item.key, match.id, match.name, 'existente');
+      const destino = String(nombreOficial(item)).slice(0, 100);
+      if (match.name !== destino) {
+        aRenombrar.push({
+          item,
+          rol: match,
+          nombreActual: match.name,
+          nombreDestino: destino,
+        });
+      }
     } else {
       faltantes.push(item);
     }
   }
-  return { detectados, faltantes, rolesLeidos: roles.length, catalogo };
+  return { detectados, faltantes, aRenombrar, rolesLeidos: roles.length, catalogo };
 }
 
 async function handle(interaction, accion, args) {
@@ -119,18 +122,16 @@ async function handle(interaction, accion, args) {
   }
 
   switch (accion) {
-    case 'menu':
-      return onMenu(interaction);
+    case 'menu': return onMenu(interaction);
     case 'crear_confirmar':
-      return onCrearConfirmar(interaction);
-    case 'crear_ejecutar':
-      return onCrearEjecutar(interaction);
-    case 'organizar_confirmar':
-      return onOrganizarConfirmar(interaction);
-    case 'organizar_ejecutar':
-      return onOrganizarEjecutar(interaction);
     case 'desplegar_ejecutar':
-      return onDesplegarEjecutar(interaction);
+    case 'crear_ejecutar': return onCrearEjecutar(interaction);
+    case 'renombrar_confirmar': return onRenombrarConfirmar(interaction);
+    case 'renombrar_ejecutar': return onRenombrarEjecutar(interaction);
+    case 'organizar_confirmar': return onOrganizarConfirmar(interaction);
+    case 'organizar_ejecutar': return onOrganizarEjecutar(interaction);
+    case 'eliminar_confirmar': return onEliminarConfirmar(interaction);
+    case 'eliminar_ejecutar': return onEliminarEjecutar(interaction);
     default:
       await interaction.reply({
         content: 'Accion no reconocida.',
@@ -143,20 +144,10 @@ async function onMenu(interaction) {
   const opcion = interaction.values[0];
   if (opcion === 'organigrama') return verOrganigrama(interaction);
   if (opcion === 'analizar') return analizar(interaction);
-  if (opcion === 'crear') return onCrearConfirmar(interaction);
-  if (opcion === 'desplegar') return onDesplegarConfirmar(interaction);
+  if (opcion === 'crear' || opcion === 'desplegar') return onCrearConfirmar(interaction);
+  if (opcion === 'renombrar') return onRenombrarConfirmar(interaction);
   if (opcion === 'organizar') return onOrganizarConfirmar(interaction);
-  if (opcion === 'eliminar_bot') {
-    await interaction.update({
-      embeds: [embedBase({
-        color: COLORES.neutral,
-        titulo: 'Eliminar roles',
-        descripcion: 'Usa `/eliminar_roles` para borrar todos los roles editables.',
-        footer: 'Administracion',
-      })],
-      components: [],
-    }).catch(() => {});
-  }
+  if (opcion === 'eliminar_bot') return onEliminarConfirmar(interaction);
 }
 
 async function verOrganigrama(interaction) {
@@ -173,7 +164,6 @@ async function verOrganigrama(interaction) {
     }
   }
   if (actual) chunks.push(actual);
-
   const embeds = chunks.slice(0, 8).map((desc, i) => embedBase({
     color: COLORES.neutral,
     titulo: i === 0 ? 'Organigrama · Fundacion Aegis-Meridian' : `Organigrama (cont. ${i + 1})`,
@@ -181,15 +171,13 @@ async function verOrganigrama(interaction) {
     footer: 'Custodes Veritatis',
     timestamp: i === 0,
   }));
-
   await interaction.editReply({ embeds, components: [] });
 }
 
 async function analizar(interaction) {
   await interaction.deferUpdate();
   await interaction.guild.roles.fetch();
-  const { detectados, faltantes, rolesLeidos } = escanear(interaction.guild);
-
+  const { detectados, faltantes, aRenombrar, rolesLeidos } = escanear(interaction.guild);
   const embeds = [embedBase({
     color: COLORES.neutral,
     titulo: 'Informe de roles',
@@ -197,65 +185,63 @@ async function analizar(interaction) {
       { name: 'Leidos', value: String(rolesLeidos), inline: true },
       { name: 'Detectados', value: String(detectados.length), inline: true },
       { name: 'Faltantes', value: String(faltantes.length), inline: true },
+      { name: 'Por renombrar', value: String(aRenombrar.length), inline: true },
     ],
-    footer: 'Match exacto por nombre oficial',
+    footer: 'Panel de roles',
   })];
-
-  if (detectados.length) {
-    embeds.push(embedBase({
-      color: COLORES.medicina,
-      titulo: `Detectados (${detectados.length})`,
-      descripcion: truncar(
-        detectados.slice(0, 25).map((d) => `· **${d.rol.name}**`).join('\n')
-      ),
-      footer: 'Ya existen',
-      timestamp: false,
-    }));
-  }
   if (faltantes.length) {
     embeds.push(embedBase({
       color: COLORES.denegado,
       titulo: `Faltantes (${faltantes.length})`,
-      descripcion: truncar(
-        faltantes.slice(0, 30).map((f) => `· ${nombreOficial(f)}`).join('\n')
-      ),
-      footer: 'Usa Desplegar organigrama',
+      descripcion: truncar(faltantes.slice(0, 25).map((f) => `· ${nombreOficial(f)}`).join('\n')),
+      footer: 'Usa Crear roles',
       timestamp: false,
     }));
   }
-
+  if (aRenombrar.length) {
+    embeds.push(embedBase({
+      color: 0xe8b923,
+      titulo: `Por renombrar (${aRenombrar.length})`,
+      descripcion: truncar(aRenombrar.slice(0, 20).map((r) => `**${r.nombreActual}** → \`${r.nombreDestino}\``).join('\n')),
+      footer: 'Usa Renombrar',
+      timestamp: false,
+    }));
+  }
   auditoria.registrar(interaction.user.id, 'CONFIG_ROLES.ANALIZAR', {
-    detectados: detectados.length,
-    faltantes: faltantes.length,
+    detectados: detectados.length, faltantes: faltantes.length, aRenombrar: aRenombrar.length,
   });
   await interaction.editReply({ embeds: embeds.slice(0, 8), components: [] });
 }
 
-async function onDesplegarConfirmar(interaction) {
+async function onCrearConfirmar(interaction) {
   await interaction.guild.roles.fetch();
-  const { faltantes, detectados } = escanear(interaction.guild);
-  const total = faltantes.length + detectados.length;
-
+  const { faltantes } = escanear(interaction.guild);
+  if (!faltantes.length) {
+    const payload = {
+      embeds: [embedBase({
+        color: COLORES.medicina,
+        titulo: 'Crear roles',
+        descripcion: 'No hay faltantes. Todo el organigrama ya existe.',
+        footer: 'Administracion',
+      })],
+      components: [],
+    };
+    if (interaction.isStringSelectMenu()) await interaction.update(payload).catch(() => {});
+    else await interaction.reply({ ...payload, flags: MessageFlags.Ephemeral }).catch(() => {});
+    return;
+  }
+  const preview = faltantes.slice(0, 25).map((f) => `· ${nombreOficial(f)}`).join('\n');
   const payload = {
     embeds: [embedBase({
       color: COLORES.neutral,
-      titulo: 'Desplegar organigrama',
-      descripcion: [
-        `Se crearan **${faltantes.length}** roles faltantes`,
-        `(separadores, cargos y permisos).`,
-        `Ya existen: **${detectados.length}** / total catalogo: **${total}**.`,
-        '',
-        'Despues se ordenaran automaticamente en la jerarquia.',
-        '',
-        truncar(faltantes.slice(0, 20).map((f) => `· ${nombreOficial(f)}`).join('\n')),
-        faltantes.length > 20 ? `… +${faltantes.length - 20}` : '',
-      ].filter(Boolean).join('\n'),
+      titulo: `Crear ${faltantes.length} roles`,
+      descripcion: `Se crearan y luego se ordenaran.\n\n${preview}${faltantes.length > 25 ? `\n… +${faltantes.length - 25}` : ''}`,
       footer: 'Confirmacion',
     })],
     components: [new ActionRowBuilder().addComponents(
       new ButtonBuilder()
-        .setCustomId(`config_roles:desplegar_ejecutar:${interaction.user.id}`)
-        .setLabel(faltantes.length ? `Crear ${faltantes.length} y ordenar` : 'Solo ordenar')
+        .setCustomId(`config_roles:crear_ejecutar:${interaction.user.id}`)
+        .setLabel(`Crear ${faltantes.length}`)
         .setStyle(ButtonStyle.Success)
     )],
   };
@@ -263,23 +249,16 @@ async function onDesplegarConfirmar(interaction) {
   else await interaction.reply({ ...payload, flags: MessageFlags.Ephemeral }).catch(() => {});
 }
 
-async function onCrearConfirmar(interaction) {
-  return onDesplegarConfirmar(interaction);
-}
-
-/** Crea faltantes y luego organiza. */
-async function onDesplegarEjecutar(interaction) {
+async function onCrearEjecutar(interaction) {
   await interaction.update({
     embeds: [embedBase({
       color: COLORES.neutral,
-      titulo: 'Desplegando organigrama',
-      descripcion: 'Creando roles y ordenando. No pulses de nuevo.',
+      titulo: 'Creando roles',
+      descripcion: 'Procesando. No pulses de nuevo.',
       footer: 'Administracion',
     })],
     components: [],
-  }).catch(async () => {
-    await interaction.deferUpdate().catch(() => {});
-  });
+  }).catch(async () => { await interaction.deferUpdate().catch(() => {}); });
 
   const guild = interaction.guild;
   if (!guild.members.me?.permissions?.has(PermissionFlagsBits.ManageRoles)) {
@@ -287,7 +266,7 @@ async function onDesplegarEjecutar(interaction) {
       embeds: [embedBase({
         color: COLORES.denegado,
         titulo: 'Sin permiso',
-        descripcion: 'El bot necesita **Manage Roles** y su rol debe estar por encima de los roles que crea.',
+        descripcion: 'Se necesita **Manage Roles** y el rol del bot por encima de los que cree.',
         footer: 'Administracion',
       })],
       components: [],
@@ -296,106 +275,84 @@ async function onDesplegarEjecutar(interaction) {
   }
 
   await guild.roles.fetch();
-  let { faltantes } = escanear(guild);
+  const { faltantes } = escanear(guild);
   let creados = 0;
   const errores = [];
 
   for (const item of faltantes) {
     try {
-      const nombre = nombreOficial(item);
-      // Discord limita nombres a 100 caracteres
-      const nombreFinal = String(nombre).slice(0, 100);
+      const nombreFinal = String(nombreOficial(item)).slice(0, 100);
       const colorInt = parseInt(String(item.color || '#888780').replace('#', ''), 16);
       const rol = await guild.roles.create({
         name: nombreFinal,
         color: Number.isFinite(colorInt) ? colorInt : 0x888780,
         hoist: false,
         mentionable: false,
-        reason: `Aegis · desplegar organigrama · ${interaction.user.tag}`,
+        reason: `Aegis · crear · ${interaction.user.tag}`,
       });
       guardarMapa(item.key, rol.id, rol.name, 'bot');
       creados++;
       await new Promise((r) => setTimeout(r, 400));
     } catch (err) {
       errores.push(nombreOficial(item));
-      console.error('[Crear rol]', nombreOficial(item), err.message || err);
+      console.error('[Crear]', nombreOficial(item), err.message || err);
     }
   }
 
-  // Re-fetch y organizar
+  // Ordenar tras crear
   await guild.roles.fetch();
-  const { detectados } = escanear(guild);
-  const ordenados = [...detectados].sort(
-    (a, b) => (a.item.orden || 999) - (b.item.orden || 999)
-  );
+  const movidos = await ordenarRoles(guild, interaction.user.tag);
 
-  const botPos = guild.members.me.roles.highest.position;
-  let pos = botPos - 1;
-  let movidos = 0;
-  let fallosPos = 0;
-
-  for (const d of ordenados) {
-    const rol = guild.roles.cache.get(d.rol.id);
-    if (!rol || !rol.editable || rol.position >= botPos) {
-      fallosPos++;
-      continue;
-    }
-    try {
-      if (pos < 1) break;
-      await rol.setPosition(pos, {
-        reason: `Aegis · organizar · ${interaction.user.tag}`,
-      });
-      pos--;
-      movidos++;
-      await new Promise((r) => setTimeout(r, 400));
-    } catch (err) {
-      fallosPos++;
-      console.error('[Organizar]', rol.name, err.message || err);
-    }
-  }
-
-  auditoria.registrar(interaction.user.id, 'CONFIG_ROLES.DESPLEGAR', {
-    creados,
-    errores: errores.length,
-    movidos,
-    fallosPos,
+  auditoria.registrar(interaction.user.id, 'CONFIG_ROLES.CREAR', {
+    creados, errores: errores.length, movidos,
   });
 
   await interaction.editReply({
     embeds: [embedBase({
       color: COLORES.medicina,
-      titulo: 'Organigrama desplegado',
+      titulo: 'Roles creados',
       descripcion: [
-        `Roles creados: **${creados}**`,
-        errores.length ? `Errores al crear: **${errores.length}**` : null,
-        `Roles ordenados: **${movidos}**`,
-        fallosPos ? `Sin mover (jerarquia del bot): **${fallosPos}**` : null,
-        '',
-        'El rol del bot debe quedar **por encima** de todos los roles del organigrama.',
-      ].filter((x) => x !== null && x !== undefined).join('\n'),
+        `Creados: **${creados}**`,
+        errores.length ? `Errores: **${errores.length}**` : null,
+        `Ordenados: **${movidos}**`,
+      ].filter(Boolean).join('\n'),
       footer: 'Administracion',
     })],
     components: [],
   });
 }
 
-async function onCrearEjecutar(interaction) {
-  return onDesplegarEjecutar(interaction);
-}
-
-async function onOrganizarConfirmar(interaction) {
+async function onRenombrarConfirmar(interaction) {
+  await interaction.guild.roles.fetch();
+  const { aRenombrar } = escanear(interaction.guild);
+  if (!aRenombrar.length) {
+    const payload = {
+      embeds: [embedBase({
+        color: COLORES.medicina,
+        titulo: 'Renombrar roles',
+        descripcion: 'Todos los detectados ya tienen el nombre oficial.',
+        footer: 'Administracion',
+      })],
+      components: [],
+    };
+    if (interaction.isStringSelectMenu()) await interaction.update(payload).catch(() => {});
+    else await interaction.reply({ ...payload, flags: MessageFlags.Ephemeral }).catch(() => {});
+    return;
+  }
+  const preview = aRenombrar.slice(0, 20).map((r) =>
+    `**${r.nombreActual}** → \`${r.nombreDestino}\``
+  ).join('\n');
   const payload = {
     embeds: [embedBase({
       color: COLORES.neutral,
-      titulo: 'Organizar jerarquia',
-      descripcion:
-        'Coloca cada rol del organigrama en su seccion (Fundacion arriba, luego Direcciones, Moderacion, etc.).',
+      titulo: `Renombrar ${aRenombrar.length} roles`,
+      descripcion: `Se aplica el nombre oficial del organigrama.\n\n${preview}${aRenombrar.length > 20 ? `\n… +${aRenombrar.length - 20}` : ''}`,
       footer: 'Confirmacion',
     })],
     components: [new ActionRowBuilder().addComponents(
       new ButtonBuilder()
-        .setCustomId(`config_roles:organizar_ejecutar:${interaction.user.id}`)
-        .setLabel('Organizar ahora')
+        .setCustomId(`config_roles:renombrar_ejecutar:${interaction.user.id}`)
+        .setLabel(`Renombrar ${aRenombrar.length}`)
         .setStyle(ButtonStyle.Primary)
     )],
   };
@@ -403,70 +360,229 @@ async function onOrganizarConfirmar(interaction) {
   else await interaction.reply({ ...payload, flags: MessageFlags.Ephemeral }).catch(() => {});
 }
 
-async function onOrganizarEjecutar(interaction) {
+async function onRenombrarEjecutar(interaction) {
   await interaction.update({
     embeds: [embedBase({
       color: COLORES.neutral,
-      titulo: 'Organizando',
-      descripcion: 'Procesando…',
+      titulo: 'Renombrando',
+      descripcion: 'Procesando. No pulses de nuevo.',
       footer: 'Administracion',
     })],
     components: [],
-  }).catch(async () => {
-    await interaction.deferUpdate().catch(() => {});
-  });
+  }).catch(async () => { await interaction.deferUpdate().catch(() => {}); });
 
   const guild = interaction.guild;
   if (!guild.members.me?.permissions?.has(PermissionFlagsBits.ManageRoles)) {
     await interaction.editReply({
-      embeds: [embedBase({
-        color: COLORES.denegado,
-        titulo: 'Sin permiso',
-        descripcion: 'Se necesita **Manage Roles**.',
-        footer: 'Administracion',
-      })],
+      embeds: [embedBase({ color: COLORES.denegado, titulo: 'Sin permiso', descripcion: 'Se necesita **Manage Roles**.', footer: 'Administracion' })],
       components: [],
     });
     return;
   }
 
   await guild.roles.fetch();
+  const { aRenombrar } = escanear(guild);
+  let hechos = 0;
+  const fallos = [];
+
+  for (const r of aRenombrar) {
+    try {
+      const rol = guild.roles.cache.get(r.rol.id);
+      if (!rol || !rol.editable) { fallos.push(r.nombreActual); continue; }
+      if (rol.name === r.nombreDestino) continue;
+      await rol.setName(r.nombreDestino, `Aegis · renombrar · ${interaction.user.tag}`);
+      guardarMapa(r.item.key, rol.id, r.nombreDestino, 'existente');
+      hechos++;
+      await new Promise((res) => setTimeout(res, 400));
+    } catch (err) {
+      fallos.push(r.nombreActual);
+      console.error('[Renombrar]', r.nombreActual, err.message || err);
+    }
+  }
+
+  auditoria.registrar(interaction.user.id, 'CONFIG_ROLES.RENOMBRAR', { hechos, fallos: fallos.length });
+  await interaction.editReply({
+    embeds: [embedBase({
+      color: COLORES.medicina,
+      titulo: 'Renombres aplicados',
+      descripcion: `Actualizados: **${hechos}**${fallos.length ? `\nSin cambiar: ${fallos.length}` : ''}`,
+      footer: 'Administracion',
+    })],
+    components: [],
+  });
+}
+
+async function onOrganizarConfirmar(interaction) {
+  const payload = {
+    embeds: [embedBase({
+      color: COLORES.neutral,
+      titulo: 'Ordenar jerarquia',
+      descripcion: 'Coloca cada rol detectado en su seccion (Fundacion arriba → Direcciones → Moderacion → …).',
+      footer: 'Confirmacion',
+    })],
+    components: [new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`config_roles:organizar_ejecutar:${interaction.user.id}`)
+        .setLabel('Ordenar ahora')
+        .setStyle(ButtonStyle.Primary)
+    )],
+  };
+  if (interaction.isStringSelectMenu()) await interaction.update(payload).catch(() => {});
+  else await interaction.reply({ ...payload, flags: MessageFlags.Ephemeral }).catch(() => {});
+}
+
+async function ordenarRoles(guild, tag) {
   const { detectados } = escanear(guild);
   const ordenados = [...detectados].sort(
     (a, b) => (a.item.orden || 999) - (b.item.orden || 999)
   );
-
   const botPos = guild.members.me.roles.highest.position;
   let pos = botPos - 1;
   let movidos = 0;
-  let fallos = 0;
-
   for (const d of ordenados) {
     const rol = guild.roles.cache.get(d.rol.id);
-    if (!rol || !rol.editable || rol.position >= botPos) {
-      fallos++;
-      continue;
-    }
+    if (!rol || !rol.editable || rol.position >= botPos) continue;
     try {
       if (pos < 1) break;
-      await rol.setPosition(pos, {
-        reason: `Aegis · organizar · ${interaction.user.tag}`,
-      });
+      await rol.setPosition(pos, { reason: `Aegis · ordenar · ${tag}` });
       pos--;
       movidos++;
       await new Promise((r) => setTimeout(r, 400));
     } catch (err) {
-      fallos++;
-      console.error('[Organizar]', rol.name, err.message || err);
+      console.error('[Ordenar]', rol.name, err.message || err);
     }
   }
+  return movidos;
+}
 
-  auditoria.registrar(interaction.user.id, 'CONFIG_ROLES.ORGANIZAR', { movidos, fallos });
+async function onOrganizarEjecutar(interaction) {
+  await interaction.update({
+    embeds: [embedBase({
+      color: COLORES.neutral,
+      titulo: 'Ordenando',
+      descripcion: 'Procesando…',
+      footer: 'Administracion',
+    })],
+    components: [],
+  }).catch(async () => { await interaction.deferUpdate().catch(() => {}); });
+
+  const guild = interaction.guild;
+  if (!guild.members.me?.permissions?.has(PermissionFlagsBits.ManageRoles)) {
+    await interaction.editReply({
+      embeds: [embedBase({ color: COLORES.denegado, titulo: 'Sin permiso', descripcion: 'Se necesita **Manage Roles**.', footer: 'Administracion' })],
+      components: [],
+    });
+    return;
+  }
+
+  await guild.roles.fetch();
+  const movidos = await ordenarRoles(guild, interaction.user.tag);
+  auditoria.registrar(interaction.user.id, 'CONFIG_ROLES.ORGANIZAR', { movidos });
   await interaction.editReply({
     embeds: [embedBase({
       color: COLORES.medicina,
-      titulo: 'Jerarquia organizada',
-      descripcion: `Roles en su lugar: **${movidos}**${fallos ? `\nSin mover: ${fallos}` : ''}`,
+      titulo: 'Jerarquia ordenada',
+      descripcion: `Roles en su lugar: **${movidos}**`,
+      footer: 'Administracion',
+    })],
+    components: [],
+  });
+}
+
+async function onEliminarConfirmar(interaction) {
+  const guild = interaction.guild;
+  await guild.roles.fetch();
+  const db = getDb();
+  asegurarColumnaOrigen();
+  const delBot = db.prepare("SELECT * FROM roles_map WHERE origen = 'bot'").all();
+  const lista = [];
+  for (const row of delBot) {
+    const rol = guild.roles.cache.get(row.role_id);
+    if (rol && rol.editable) lista.push(rol);
+  }
+
+  if (!lista.length) {
+    const payload = {
+      embeds: [embedBase({
+        color: COLORES.neutral,
+        titulo: 'Eliminar roles del bot',
+        descripcion: 'No hay roles creados por el bot registrados.\n\nPara borrar todos los roles editables usa `/eliminar_roles`.',
+        footer: 'Administracion',
+      })],
+      components: [],
+    };
+    if (interaction.isStringSelectMenu()) await interaction.update(payload).catch(() => {});
+    else await interaction.reply({ ...payload, flags: MessageFlags.Ephemeral }).catch(() => {});
+    return;
+  }
+
+  const preview = lista.slice(0, 25).map((r) => `· ${r.name}`).join('\n');
+  const payload = {
+    embeds: [embedBase({
+      color: COLORES.denegado,
+      titulo: `Eliminar ${lista.length} roles del bot`,
+      descripcion: preview + (lista.length > 25 ? `\n… +${lista.length - 25}` : ''),
+      footer: 'Confirmacion',
+    })],
+    components: [new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`config_roles:eliminar_ejecutar:${interaction.user.id}`)
+        .setLabel(`Eliminar ${lista.length}`)
+        .setStyle(ButtonStyle.Danger)
+    )],
+  };
+  if (interaction.isStringSelectMenu()) await interaction.update(payload).catch(() => {});
+  else await interaction.reply({ ...payload, flags: MessageFlags.Ephemeral }).catch(() => {});
+}
+
+async function onEliminarEjecutar(interaction) {
+  await interaction.update({
+    embeds: [embedBase({
+      color: COLORES.neutral,
+      titulo: 'Eliminando',
+      descripcion: 'Procesando. No pulses de nuevo.',
+      footer: 'Administracion',
+    })],
+    components: [],
+  }).catch(async () => { await interaction.deferUpdate().catch(() => {}); });
+
+  const guild = interaction.guild;
+  if (!guild.members.me?.permissions?.has(PermissionFlagsBits.ManageRoles)) {
+    await interaction.editReply({
+      embeds: [embedBase({ color: COLORES.denegado, titulo: 'Sin permiso', descripcion: 'Se necesita **Manage Roles**.', footer: 'Administracion' })],
+      components: [],
+    });
+    return;
+  }
+
+  const db = getDb();
+  asegurarColumnaOrigen();
+  const delBot = db.prepare("SELECT * FROM roles_map WHERE origen = 'bot'").all();
+  let eliminados = 0;
+  const fallos = [];
+
+  for (const row of delBot) {
+    try {
+      const rol = guild.roles.cache.get(row.role_id);
+      if (rol && rol.editable) {
+        await rol.delete(`Aegis · eliminar bot · ${interaction.user.tag}`);
+        eliminados++;
+        await new Promise((r) => setTimeout(r, 400));
+      }
+      db.prepare("DELETE FROM roles_map WHERE cargo_key = ? AND origen = 'bot'").run(row.cargo_key);
+    } catch (err) {
+      fallos.push(row.nombre_rol || row.cargo_key);
+    }
+  }
+
+  auditoria.registrar(interaction.user.id, 'CONFIG_ROLES.ELIMINAR_BOT', {
+    eliminados, fallos: fallos.length,
+  });
+  await interaction.editReply({
+    embeds: [embedBase({
+      color: COLORES.medicina,
+      titulo: 'Eliminacion completada',
+      descripcion: `Eliminados: **${eliminados}**${fallos.length ? `\nFallos: ${fallos.length}` : ''}`,
       footer: 'Administracion',
     })],
     components: [],
