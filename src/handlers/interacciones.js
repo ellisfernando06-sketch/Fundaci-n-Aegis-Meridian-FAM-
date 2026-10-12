@@ -1,11 +1,7 @@
 const { Collection, MessageFlags } = require('discord.js');
 const path = require('path');
 const fs = require('fs');
-
-/**
- * Manejador global de interacciones.
- * customId: modulo:accion:id
- */
+const { verificarAcceso } = require('../services/acceso');
 
 const handlers = new Collection();
 
@@ -60,6 +56,18 @@ async function manejarInteraccion(interaction) {
         }).catch(() => {});
         return;
       }
+
+      // Control de acceso por nivel + keys
+      const acceso = verificarAcceso(interaction);
+      if (!acceso.ok) {
+        await interaction.reply({
+          embeds: acceso.embed ? [acceso.embed] : undefined,
+          content: acceso.embed ? undefined : (acceso.motivo || 'Acceso denegado.'),
+          flags: MessageFlags.Ephemeral,
+        }).catch(() => {});
+        return;
+      }
+
       await comando.execute(interaction);
       return;
     }
