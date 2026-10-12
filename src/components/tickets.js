@@ -11,6 +11,7 @@ const {
   transcribir,
   asegurarTabla,
   iconoInstitucional,
+  TIPOS,
 } = require('../services/tickets');
 const { embedBase, COLORES, MARCA } = require('../utils/plantillas');
 const { getDb } = require('../db');
@@ -33,7 +34,7 @@ async function handle(interaction, accion, args) {
       return onTranscribir(interaction, args[0], true);
     default:
       await interaction.reply({
-        content: 'Accion de ticket no reconocida.',
+        content: 'Acción de ticket no reconocida.',
         flags: MessageFlags.Ephemeral,
       }).catch(() => {});
   }
@@ -54,7 +55,7 @@ async function onAbrir(interaction, tipo) {
         author: { name: MARCA.nombre, iconURL: icon || undefined },
         titulo: 'Expediente ya abierto',
         descripcion: `Ya dispones del ticket **${abierto.id}** en <#${abierto.canal_id}>.`,
-        footer: 'Mesa de Asistencia',
+        footer: MARCA.division,
         footerIcon: icon || undefined,
       })],
     });
@@ -73,27 +74,28 @@ async function onAbrir(interaction, tipo) {
             `Referencia **${r.id}**\n` +
             `Control: <#${r.canal.id}>\n` +
             `Sala: <#${r.voz.id}>`,
-          footer: 'Mesa de Asistencia',
+          footer: MARCA.division,
           footerIcon: icon || undefined,
         })],
       });
       return;
     }
 
-    const tipoFinal = tipo === 'reporte' ? 'reporte' : 'soporte';
+    const tipoFinal = TIPOS[tipo] ? tipo : 'soporte';
     const r = await crearTicketTexto(
       interaction.guild,
       interaction.member,
       tipoFinal,
       interaction.client
     );
+    const meta = TIPOS[tipoFinal] || TIPOS.soporte;
     await interaction.editReply({
       embeds: [embedBase({
-        color: COLORES.institucional,
+        color: meta.color || COLORES.institucional,
         author: { name: MARCA.nombre, iconURL: icon || undefined },
-        titulo: 'Ticket abierto',
+        titulo: `Ticket abierto · ${meta.label}`,
         descripcion: `Referencia **${r.id}** · <#${r.canal.id}>`,
-        footer: 'Mesa de Asistencia',
+        footer: MARCA.division,
         footerIcon: icon || undefined,
       })],
     });
@@ -104,7 +106,7 @@ async function onAbrir(interaction, tipo) {
         author: { name: MARCA.nombre, iconURL: icon || undefined },
         titulo: 'No se pudo abrir el ticket',
         descripcion: String(err.message || err).slice(0, 400),
-        footer: 'Mesa de Asistencia',
+        footer: MARCA.division,
         footerIcon: icon || undefined,
       })],
     });
@@ -135,7 +137,7 @@ async function onAgregarMenu(interaction, ticketId) {
       author: { name: MARCA.nombre, iconURL: icon || undefined },
       titulo: 'Incorporar personal al expediente',
       descripcion: `Ticket **${ticketId}**. Elige un miembro del servidor.`,
-      footer: 'Mesa de Asistencia',
+      footer: MARCA.division,
       footerIcon: icon || undefined,
     })],
     components: [row],
@@ -164,7 +166,7 @@ async function onAgregar(interaction, ticketId) {
         author: { name: MARCA.nombre, iconURL: icon || undefined },
         titulo: 'Acceso concedido',
         descripcion: `<@${userId}> incorporado al ticket **${ticketId}**.`,
-        footer: 'Mesa de Asistencia',
+        footer: MARCA.division,
         footerIcon: icon || undefined,
       })],
       flags: MessageFlags.Ephemeral,
@@ -194,11 +196,11 @@ async function onTranscribir(interaction, ticketId, cerrar) {
       embeds: [embedBase({
         color: COLORES.institucional,
         author: { name: MARCA.nombre, iconURL: icon || undefined },
-        titulo: cerrar ? 'Expediente cerrado' : 'Transcripcion archivada',
+        titulo: cerrar ? 'Expediente cerrado' : 'Transcripción archivada',
         descripcion: cerrar
           ? `**${ticketId}** cerrado. Copia en el canal de archivo.`
-          : `Transcripcion de **${ticketId}** enviada a logs.`,
-        footer: 'Mesa de Asistencia',
+          : `Transcripción de **${ticketId}** enviada a logs.`,
+        footer: MARCA.division,
         footerIcon: icon || undefined,
       })],
     });
@@ -207,9 +209,9 @@ async function onTranscribir(interaction, ticketId, cerrar) {
       embeds: [embedBase({
         color: COLORES.denegado,
         author: { name: MARCA.nombre, iconURL: icon || undefined },
-        titulo: 'Operacion no completada',
+        titulo: 'Operación no completada',
         descripcion: String(err.message || err).slice(0, 400),
-        footer: 'Mesa de Asistencia',
+        footer: MARCA.division,
         footerIcon: icon || undefined,
       })],
     });
