@@ -54,23 +54,44 @@ async function fetchConReintento(url, options = {}, intentos = 3) {
 /**
  * Busca un usuario de Roblox por nombre de usuario.
  * POST https://users.roblox.com/v1/usernames/users
+ * Devuelve { id, name, displayName } o lanza si no existe.
  */
 async function buscarPorUsuario(username) {
-  const key = `user:${username.toLowerCase()}`;
+  const limpio = String(username || '').trim().replace(/^@/, '');
+  if (!limpio) throw new Error('Indica un nombre de usuario de Roblox.');
+
+  const key = `user:${limpio.toLowerCase()}`;
   const cached = cacheGet(key);
   if (cached) return cached;
 
   const data = await fetchConReintento('https://users.roblox.com/v1/usernames/users', {
     method: 'POST',
     body: JSON.stringify({
-      usernames: [username],
+      usernames: [limpio],
       excludeBannedUsers: true,
     }),
   });
 
-  const user = data.data?.[0] || null;
-  if (user) cacheSet(key, user);
+  const raw = data.data?.[0] || null;
+  if (!raw || raw.requestedUsername === undefined && !raw.id) {
+    // API puede devolver entrada vacía o requestedUsername sin id si no existe
+  }
+  if (!raw || raw.id == null) {
+    throw new Error(`No se encontró el usuario de Roblox «${limpio}».`);
+  }
+
+  const user = {
+    id: raw.id,
+    name: raw.name || limpio,
+    displayName: raw.displayName || raw.name || limpio,
+  };
+  cacheSet(key, user);
   return user;
+}
+
+/** Alias usado por components/perfil.js */
+async function buscarUsuario(username) {
+  return buscarPorUsuario(username);
 }
 
 /**
@@ -124,13 +145,20 @@ function generarCodigo() {
 async function verificarCodigo(userId, codigo) {
   const user = await obtenerUsuario(userId);
   if (!user || !user.description) return false;
-  return user.description.includes(codigo);
+  return String(user.description).includes(String(codigo));
+}
+
+/** Alias usado por components/perfil.js */
+async function verificarCodigoEnDescripcion(userId, codigo) {
+  return verificarCodigo(userId, codigo);
 }
 
 module.exports = {
   buscarPorUsuario,
+  buscarUsuario,
   obtenerUsuario,
   obtenerAvatar,
   generarCodigo,
   verificarCodigo,
+  verificarCodigoEnDescripcion,
 };
