@@ -10,8 +10,9 @@ const {
   agregarPersona,
   transcribir,
   asegurarTabla,
+  iconoInstitucional,
 } = require('../services/tickets');
-const { embedBase, COLORES } = require('../utils/plantillas');
+const { embedBase, COLORES, MARCA } = require('../utils/plantillas');
 const { getDb } = require('../db');
 
 const prefix = 'tickets';
@@ -40,8 +41,8 @@ async function handle(interaction, accion, args) {
 
 async function onAbrir(interaction, tipo) {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const icon = iconoInstitucional(interaction.client, interaction.guild);
 
-  // Un ticket abierto por usuario
   const db = getDb();
   const abierto = db.prepare(
     "SELECT id, canal_id FROM tickets WHERE autor_id = ? AND estado = 'abierto' LIMIT 1"
@@ -50,9 +51,11 @@ async function onAbrir(interaction, tipo) {
     await interaction.editReply({
       embeds: [embedBase({
         color: COLORES.amarillo,
-        titulo: 'Ticket ya abierto',
-        descripcion: `Ya tienes el ticket **${abierto.id}** en <#${abierto.canal_id}>.`,
-        footer: 'Tickets',
+        author: { name: MARCA.nombre, iconURL: icon || undefined },
+        titulo: 'Expediente ya abierto',
+        descripcion: `Ya dispones del ticket **${abierto.id}** en <#${abierto.canal_id}>.`,
+        footer: 'Mesa de Asistencia',
+        footerIcon: icon || undefined,
       })],
     });
     return;
@@ -60,35 +63,49 @@ async function onAbrir(interaction, tipo) {
 
   try {
     if (tipo === 'voz') {
-      const r = await crearTicketVoz(interaction.guild, interaction.member);
+      const r = await crearTicketVoz(interaction.guild, interaction.member, interaction.client);
       await interaction.editReply({
         embeds: [embedBase({
-          color: COLORES.medicina,
-          titulo: 'Ticket de voz creado',
-          descripcion: `**${r.id}** · canal <#${r.canal.id}> · voz <#${r.voz.id}>`,
-          footer: 'Tickets',
+          color: COLORES.institucional,
+          author: { name: MARCA.nombre, iconURL: icon || undefined },
+          titulo: 'Ticket de voz abierto',
+          descripcion:
+            `Referencia **${r.id}**\n` +
+            `Control: <#${r.canal.id}>\n` +
+            `Sala: <#${r.voz.id}>`,
+          footer: 'Mesa de Asistencia',
+          footerIcon: icon || undefined,
         })],
       });
       return;
     }
 
     const tipoFinal = tipo === 'reporte' ? 'reporte' : 'soporte';
-    const r = await crearTicketTexto(interaction.guild, interaction.member, tipoFinal);
+    const r = await crearTicketTexto(
+      interaction.guild,
+      interaction.member,
+      tipoFinal,
+      interaction.client
+    );
     await interaction.editReply({
       embeds: [embedBase({
-        color: COLORES.medicina,
-        titulo: 'Ticket creado',
-        descripcion: `**${r.id}** · <#${r.canal.id}>`,
-        footer: 'Tickets',
+        color: COLORES.institucional,
+        author: { name: MARCA.nombre, iconURL: icon || undefined },
+        titulo: 'Ticket abierto',
+        descripcion: `Referencia **${r.id}** · <#${r.canal.id}>`,
+        footer: 'Mesa de Asistencia',
+        footerIcon: icon || undefined,
       })],
     });
   } catch (err) {
     await interaction.editReply({
       embeds: [embedBase({
         color: COLORES.denegado,
-        titulo: 'No se pudo crear el ticket',
+        author: { name: MARCA.nombre, iconURL: icon || undefined },
+        titulo: 'No se pudo abrir el ticket',
         descripcion: String(err.message || err).slice(0, 400),
-        footer: 'Tickets',
+        footer: 'Mesa de Asistencia',
+        footerIcon: icon || undefined,
       })],
     });
   }
@@ -103,20 +120,23 @@ async function onAgregarMenu(interaction, ticketId) {
     return;
   }
 
+  const icon = iconoInstitucional(interaction.client, interaction.guild);
   const row = new ActionRowBuilder().addComponents(
     new UserSelectMenuBuilder()
       .setCustomId(`tickets:agregar:${ticketId}`)
-      .setPlaceholder('Selecciona a quien agregar')
+      .setPlaceholder('Selecciona al miembro')
       .setMinValues(1)
       .setMaxValues(1),
   );
 
   await interaction.reply({
     embeds: [embedBase({
-      color: COLORES.cupula,
-      titulo: 'Agregar persona al ticket',
+      color: COLORES.institucional,
+      author: { name: MARCA.nombre, iconURL: icon || undefined },
+      titulo: 'Incorporar personal al expediente',
       descripcion: `Ticket **${ticketId}**. Elige un miembro del servidor.`,
-      footer: 'Tickets',
+      footer: 'Mesa de Asistencia',
+      footerIcon: icon || undefined,
     })],
     components: [row],
     flags: MessageFlags.Ephemeral,
@@ -134,15 +154,18 @@ async function onAgregar(interaction, ticketId) {
 
   await interaction.deferUpdate();
   const userId = interaction.values[0];
+  const icon = iconoInstitucional(interaction.client, interaction.guild);
 
   try {
     await agregarPersona(interaction.guild, ticketId, userId, interaction.user);
     await interaction.followUp({
       embeds: [embedBase({
         color: COLORES.medicina,
-        titulo: 'Persona agregada',
-        descripcion: `<@${userId}> ahora tiene acceso al ticket **${ticketId}**.`,
-        footer: 'Tickets',
+        author: { name: MARCA.nombre, iconURL: icon || undefined },
+        titulo: 'Acceso concedido',
+        descripcion: `<@${userId}> incorporado al ticket **${ticketId}**.`,
+        footer: 'Mesa de Asistencia',
+        footerIcon: icon || undefined,
       })],
       flags: MessageFlags.Ephemeral,
     });
@@ -164,25 +187,30 @@ async function onTranscribir(interaction, ticketId, cerrar) {
   }
 
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const icon = iconoInstitucional(interaction.client, interaction.guild);
   try {
     await transcribir(interaction.guild, ticketId, interaction.user, { cerrar });
     await interaction.editReply({
       embeds: [embedBase({
-        color: COLORES.medicina,
-        titulo: cerrar ? 'Ticket cerrado' : 'Transcripcion enviada',
+        color: COLORES.institucional,
+        author: { name: MARCA.nombre, iconURL: icon || undefined },
+        titulo: cerrar ? 'Expediente cerrado' : 'Transcripcion archivada',
         descripcion: cerrar
-          ? `**${ticketId}** cerrado. Transcripcion en el canal de logs.`
+          ? `**${ticketId}** cerrado. Copia en el canal de archivo.`
           : `Transcripcion de **${ticketId}** enviada a logs.`,
-        footer: 'Tickets',
+        footer: 'Mesa de Asistencia',
+        footerIcon: icon || undefined,
       })],
     });
   } catch (err) {
     await interaction.editReply({
       embeds: [embedBase({
         color: COLORES.denegado,
+        author: { name: MARCA.nombre, iconURL: icon || undefined },
         titulo: 'Operacion no completada',
         descripcion: String(err.message || err).slice(0, 400),
-        footer: 'Tickets',
+        footer: 'Mesa de Asistencia',
+        footerIcon: icon || undefined,
       })],
     });
   }
