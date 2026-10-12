@@ -95,33 +95,41 @@ function seedInicial() {
     set.run('alerta_mensaje', 'Sitio en estado normal de operaciones.');
   }
 
-  // Canal oculto para /interna (opcional)
   const canalInterna = db.prepare("SELECT valor FROM config WHERE clave = 'canal_interna'").get();
   if (!canalInterna) {
     db.prepare("INSERT OR IGNORE INTO config (clave, valor) VALUES ('canal_interna', '')").run();
   }
 
-  const contadores = ['PER', 'AP', 'FAM', 'INC', 'MIS', 'SAN', 'EXP', 'SOL', 'CAS'];
+  // Incluye contadores de tickets, finanzas y tienda
+  const contadores = [
+    'PER', 'AP', 'FAM', 'INC', 'MIS', 'SAN', 'EXP', 'SOL', 'CAS',
+    'TKT', 'TRF', 'FIN', 'ITM', 'CMP',
+  ];
   const insertCont = db.prepare('INSERT OR IGNORE INTO contadores (tipo, valor) VALUES (?, 0)');
   for (const t of contadores) {
     insertCont.run(t);
   }
 }
 
+/**
+ * Genera ID secuencial. Crea el contador si no existe (evita TKT-0001 duplicado).
+ */
 function nextId(tipo) {
-  const row = db.prepare('SELECT valor FROM contadores WHERE tipo = ?').get(tipo);
-  const nuevo = (row ? row.valor : 0) + 1;
-  db.prepare('UPDATE contadores SET valor = ? WHERE tipo = ?').run(nuevo, tipo);
+  const d = getDb();
+  d.prepare('INSERT OR IGNORE INTO contadores (tipo, valor) VALUES (?, 0)').run(tipo);
+  const row = d.prepare('SELECT valor FROM contadores WHERE tipo = ?').get(tipo);
+  const nuevo = (row ? Number(row.valor) : 0) + 1;
+  d.prepare('UPDATE contadores SET valor = ? WHERE tipo = ?').run(nuevo, tipo);
   return `${tipo}-${String(nuevo).padStart(4, '0')}`;
 }
 
 function getConfig(clave) {
-  const row = db.prepare('SELECT valor FROM config WHERE clave = ?').get(clave);
+  const row = getDb().prepare('SELECT valor FROM config WHERE clave = ?').get(clave);
   return row ? row.valor : null;
 }
 
 function setConfig(clave, valor) {
-  db.prepare(
+  getDb().prepare(
     'INSERT INTO config (clave, valor) VALUES (?, ?) ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor'
   ).run(clave, typeof valor === 'string' ? valor : JSON.stringify(valor));
 }
