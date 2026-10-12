@@ -1,5 +1,5 @@
 /**
- * Finanzas institucionales · Fundacion Aegis-Meridian
+ * Finanzas institucionales · Fundación Aegis-Meridian
  * Moneda interna: créditos Aegis (₡)
  * Control exclusivo del Fundador para operaciones de caja.
  */
@@ -15,7 +15,7 @@ const {
 } = require('discord.js');
 const { getDb, nextId } = require('../db');
 const { getTodosCargos, getCargoPorKey } = require('../data/organigrama');
-const { embedBase, COLORES } = require('../utils/plantillas');
+const { embedBase, COLORES, MARCA, logoUrl } = require('../utils/plantillas');
 const { sanitizar, truncar } = require('../utils/helpers');
 const auditoria = require('./auditoria');
 const { actorTexto } = require('./solicitudes');
@@ -69,13 +69,9 @@ function asegurarTablas() {
 
 function esFundador(member) {
   if (!member) return false;
-  if (member.permissions?.has?.('Administrator')) {
-    // Preferir rol de fundador en mapa; Admin solo si no hay mapa
-  }
   const db = getDb();
   const row = db.prepare("SELECT role_id FROM roles_map WHERE cargo_key = 'ST.FUNDADOR'").get();
   if (row?.role_id && member.roles?.cache?.has(row.role_id)) return true;
-  // Fallback: nombre de rol contiene fundador (exacto preferible)
   return member.roles?.cache?.some((r) =>
     /fundador/i.test(r.name) && !/co\s*fundador/i.test(r.name)
   ) || false;
@@ -147,7 +143,8 @@ function upsertSalario(cargoKey, monto, intervaloDias, actorTag) {
 }
 
 /** Panel principal del fundador */
-function embedPanelControl() {
+function embedPanelControl(ctx = {}) {
+  const icon = logoUrl(ctx.client, ctx.guild);
   const salarios = listarSalarios().filter((s) => s.activo && s.monto > 0);
   const lineas = salarios.length
     ? salarios.slice(0, 20).map((s) => {
@@ -162,14 +159,17 @@ function embedPanelControl() {
   const pend = db.prepare("SELECT COUNT(*) AS n FROM finanzas_pendientes WHERE estado = 'pendiente'").get();
 
   return embedBase({
-    color: 0x1a1a2e,
-    titulo: '▣ Oficina de Finanzas · F.A.M.',
+    color: COLORES.finanzas,
+    author: { name: `${MARCA.nombre} · ${MARCA.corto}`, iconURL: icon || undefined },
+    titulo: `▣ ${MARCA.finanzas}`,
     descripcion:
+      `*${MARCA.lema}*\n\n` +
       'Control institucional de **créditos Aegis**.\n' +
-      'Solo el **Fundador** autoriza movimientos de caja y nominas manuales.',
+      'Solo el **Fundador** autoriza movimientos de caja y nóminas manuales.\n\n' +
+      '─────────────────────────────',
     campos: [
       {
-        name: '──── Resumen de caja ────',
+        name: '╭─  Resumen de caja',
         value:
           `Cuentas activas: **${caja?.n ?? 0}**\n` +
           `Circulante registrado: **${formatear(caja?.total ?? 0)}**\n` +
@@ -177,21 +177,23 @@ function embedPanelControl() {
         inline: false,
       },
       {
-        name: '──── Escala salarial (vista) ────',
+        name: '╭─  Escala salarial',
         value: truncar(lineas, 1000),
         inline: false,
       },
       {
-        name: '──── Operaciones ────',
+        name: '╭─  Operaciones disponibles',
         value:
           '**Configurar salario** — monto e intervalo por cargo\n' +
           '**Pago manual** — transferencia individual con firma en DM\n' +
-          '**Procesar nómina** — genera pendientes segun escala\n' +
-          '**Libro mayor** — ultimos movimientos',
+          '**Procesar nómina** — genera pendientes según escala\n' +
+          '**Libro mayor** — últimos movimientos',
         inline: false,
       },
     ],
-    footer: 'Finanzas · Confidencial',
+    thumbnail: icon || undefined,
+    footer: `${MARCA.finanzas} · Confidencial`,
+    footerIcon: icon || undefined,
   });
 }
 
@@ -200,7 +202,7 @@ function botonesPanel() {
     new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId('finanzas:cfg_salario').setLabel('Configurar salario').setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId('finanzas:pago_manual').setLabel('Pago manual').setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId('finanzas:nomina').setLabel('Procesar nomina').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('finanzas:nomina').setLabel('Procesar nómina').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId('finanzas:libro').setLabel('Libro mayor').setStyle(ButtonStyle.Secondary),
     ),
     new ActionRowBuilder().addComponents(
@@ -308,6 +310,7 @@ async function emitirTransferencia({ client, guild, beneficiarioId, monto, conce
   const user = await client.users.fetch(beneficiarioId).catch(() => null);
   if (!user) return { id, dm: false };
 
+  const icon = logoUrl(client, guild);
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId(`finanzas:firmar:${id}`)
@@ -323,22 +326,25 @@ async function emitirTransferencia({ client, guild, beneficiarioId, monto, conce
     await user.send({
       embeds: [
         embedBase({
-          color: 0xc9a227,
-          titulo: 'Notificacion de transferencia · F.A.M.',
+          color: COLORES.oro,
+          author: { name: `${MARCA.nombre} · ${MARCA.corto}`, iconURL: icon || undefined },
+          titulo: `Notificación de transferencia · ${MARCA.finanzas}`,
           descripcion:
+            `*${MARCA.lema}*\n\n` +
             'La **Oficina de Finanzas** ha autorizado un movimiento a tu favor.\n' +
-            'Para completar el deposito debes **firmar** esta notificacion.',
+            'Para completar el depósito debes **firmar** esta notificación.',
           campos: [
-            { name: 'Referencia', value: id, inline: true },
+            { name: 'Referencia', value: `\`${id}\``, inline: true },
             { name: 'Importe', value: formatear(monto), inline: true },
             { name: 'Concepto', value: truncar(sanitizar(concepto), 200), inline: false },
             {
-              name: 'Condicion',
-              value: 'Al firmar confirmas haber sido notificado y aceptas el credito en tu cuenta interna.',
+              name: 'Condición',
+              value: 'Al firmar confirmas haber sido notificado y aceptas el crédito en tu cuenta interna.',
               inline: false,
             },
           ],
-          footer: 'Finanzas · Firma electronica',
+          footer: `${MARCA.finanzas} · Firma electrónica`,
+          footerIcon: icon || undefined,
         }),
       ],
       components: [row],
@@ -372,17 +378,12 @@ async function firmarTransferencia(pendienteId, userId, aceptar) {
     firmaEstado: 'firmada',
   });
   db.prepare("UPDATE finanzas_pendientes SET estado = 'firmada' WHERE id = ?").run(pendienteId);
-  // actualizar saldo_despues real
   db.prepare('UPDATE finanzas_movimientos SET saldo_despues = ? WHERE id = ?').run(saldo, movId);
 
   auditoria.registrar(userId, 'FIN.FIRMAR', { id: pendienteId, movId, monto: p.monto });
   return { p, aceptada: true, saldo, movId };
 }
 
-/**
- * Nomina: para cada miembro con cargo mapeado y salario activo, emite pendiente si corresponde intervalo.
- * Simplificado: emite a todos los que tienen el rol del cargo (una vez por ejecucion manual del fundador).
- */
 async function procesarNomina(guild, client, actorTag) {
   asegurarTablas();
   const salarios = listarSalarios().filter((s) => s.activo && s.monto > 0);
@@ -407,7 +408,7 @@ async function procesarNomina(guild, client, actorTag) {
           guild,
           beneficiarioId: member.id,
           monto: sal.monto,
-          concepto: `Nomina · ${sal.cargo.nombre || sal.cargo_key} · intervalo ${sal.intervalo_dias}d`,
+          concepto: `Nómina · ${sal.cargo.nombre || sal.cargo_key} · intervalo ${sal.intervalo_dias}d`,
           autorizadoPor: actorTag,
         });
         resultados.emitidos += 1;
