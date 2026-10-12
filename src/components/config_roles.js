@@ -9,7 +9,6 @@ const { getDb } = require('../db');
 const auditoria = require('../services/auditoria');
 const { embedBase, COLORES } = require('../utils/plantillas');
 const {
-  ROLES_IGNORAR,
   getJerarquiaCompleta,
   getOrganigramaTexto,
   nombreBaseRol,
@@ -26,7 +25,9 @@ function esAdmin(interaction) {
 }
 
 function asegurarColumnaOrigen() {
-  try { getDb().exec(`ALTER TABLE roles_map ADD COLUMN origen TEXT DEFAULT 'existente'`); } catch (_) {}
+  try {
+    getDb().exec(`ALTER TABLE roles_map ADD COLUMN origen TEXT DEFAULT 'existente'`);
+  } catch (_) {}
 }
 
 function guardarMapa(cargoKey, roleId, nombreRol, origen) {
@@ -40,33 +41,31 @@ function guardarMapa(cargoKey, roleId, nombreRol, origen) {
   ).run(cargoKey, roleId, nombreRol, origen);
 }
 
-function debeIgnorar(nombre) {
-  const n = normalizarNombre(nombre);
-  if (!n) return true;
-  if (n === 'bot oficial' || n === 'bots' || n === 'bot') return true;
-  return false;
+/** Nombre oficial del item en Discord */
+function nombreOficial(item) {
+  return item.nombreRol || item.nombre || item.key;
 }
 
-function coincide(rol, item) {
-  const base = normalizarNombre(nombreBaseRol(rol.name));
-  const nom = normalizarNombre(rol.name);
-  const esp = normalizarNombre(item.nombre || nombreBaseRol(item.nombreRol || ''));
-  if (!esp) return false;
-  if (base === esp || nom === esp) return true;
-  if (item.aliases) {
-    for (const a of item.aliases) {
-      const na = normalizarNombre(a);
-      if (base === na || nom === na) return true;
-      if (na.length >= 5 && (base.includes(na) || nom.includes(na))) return true;
-    }
-  }
-  if (esp.length >= 5 && (base.includes(esp) || nom.includes(esp))) return true;
+/**
+ * Para CREAR: solo coincide si el nombre normalizado es exactamente el oficial
+ * (o el nombre base sin prefijo). Evita falsos "ya existe".
+ */
+function existeExacto(rolDiscord, item) {
+  const oficial = normalizarNombre(nombreOficial(item));
+  const nom = normalizarNombre(rolDiscord.name);
+  const base = normalizarNombre(nombreBaseRol(rolDiscord.name));
+  if (!oficial) return false;
+  if (nom === oficial) return true;
+  // Separadores: comparar texto del separador
+  if (item.tipo === 'separador' && (nom === oficial || base === oficial)) return true;
+  // Cargo: nombre base igual al nombre del cargo (sin prefijo)
+  if (item.nombre && base === normalizarNombre(item.nombre)) return true;
   return false;
 }
 
 function escanear(guild) {
   const roles = [...guild.roles.cache.values()].filter(
-    (r) => r.id !== guild.id && !r.managed && !debeIgnorar(r.name)
+    (r) => r.id !== guild.id && !r.managed
   );
   const catalogo = getJerarquiaCompleta();
   const usados = new Set();
@@ -77,7 +76,7 @@ function escanear(guild) {
     let match = null;
     for (const rol of roles) {
       if (usados.has(rol.id)) continue;
-      if (coincide(rol, item)) {
+      if (existeExacto(rol, item)) {
         match = rol;
         break;
       }
@@ -95,28 +94,48 @@ function escanear(guild) {
 
 async function handle(interaction, accion, args) {
   if (!esAdmin(interaction)) {
-    await interaction.reply({ content: 'No tienes autorizacion para esta accion.', flags: MessageFlags.Ephemeral }).catch(() => {});
+    await interaction.reply({
+      content: 'No tienes autorizacion para esta accion.',
+      flags: MessageFlags.Ephemeral,
+    }).catch(() => {});
     return;
   }
   const ownerId = args[0];
   if (ownerId && ownerId !== interaction.user.id) {
-    await interaction.reply({ content: 'Solo quien abrio el menu puede usarlo.', flags: MessageFlags.Ephemeral }).catch(() => {});
+    await interaction.reply({
+      content: 'Solo quien abrio el menu puede usarlo.',
+      flags: MessageFlags.Ephemeral,
+    }).catch(() => {});
     return;
   }
 
   if (accion === 'eliminar_todos_ejecutar' || accion === 'eliminar_todos_cancelar') {
     const h = require('./eliminar_todos_handlers');
-    return h.handle(interaction, accion === 'eliminar_todos_ejecutar' ? 'ejecutar' : 'cancelar', args);
+    return h.handle(
+      interaction,
+      accion === 'eliminar_todos_ejecutar' ? 'ejecutar' : 'cancelar',
+      args
+    );
   }
 
   switch (accion) {
-    case 'menu': return onMenu(interaction);
-    case 'crear_confirmar': return onCrearConfirmar(interaction);
-    case 'crear_ejecutar': return onCrearEjecutar(interaction);
-    case 'organizar_confirmar': return onOrganizarConfirmar(interaction);
-    case 'organizar_ejecutar': return onOrganizarEjecutar(interaction);
+    case 'menu':
+      return onMenu(interaction);
+    case 'crear_confirmar':
+      return onCrearConfirmar(interaction);
+    case 'crear_ejecutar':
+      return onCrearEjecutar(interaction);
+    case 'organizar_confirmar':
+      return onOrganizarConfirmar(interaction);
+    case 'organizar_ejecutar':
+      return onOrganizarEjecutar(interaction);
+    case 'desplegar_ejecutar':
+      return onDesplegarEjecutar(interaction);
     default:
-      await interaction.reply({ content: 'Accion no reconocida.', flags: MessageFlags.Ephemeral }).catch(() => {});
+      await interaction.reply({
+        content: 'Accion no reconocida.',
+        flags: MessageFlags.Ephemeral,
+      }).catch(() => {});
   }
 }
 
@@ -125,8 +144,8 @@ async function onMenu(interaction) {
   if (opcion === 'organigrama') return verOrganigrama(interaction);
   if (opcion === 'analizar') return analizar(interaction);
   if (opcion === 'crear') return onCrearConfirmar(interaction);
+  if (opcion === 'desplegar') return onDesplegarConfirmar(interaction);
   if (opcion === 'organizar') return onOrganizarConfirmar(interaction);
-  if (opcion === 'renombrar') return onCrearConfirmar(interaction);
   if (opcion === 'eliminar_bot') {
     await interaction.update({
       embeds: [embedBase({
@@ -179,15 +198,17 @@ async function analizar(interaction) {
       { name: 'Detectados', value: String(detectados.length), inline: true },
       { name: 'Faltantes', value: String(faltantes.length), inline: true },
     ],
-    footer: 'Organigrama Aegis-Meridian',
+    footer: 'Match exacto por nombre oficial',
   })];
 
   if (detectados.length) {
     embeds.push(embedBase({
       color: COLORES.medicina,
       titulo: `Detectados (${detectados.length})`,
-      descripcion: truncar(detectados.slice(0, 25).map((d) => `· **${d.rol.name}** → \`${d.item.key}\``).join('\n')),
-      footer: 'Se reutilizan',
+      descripcion: truncar(
+        detectados.slice(0, 25).map((d) => `· **${d.rol.name}**`).join('\n')
+      ),
+      footer: 'Ya existen',
       timestamp: false,
     }));
   }
@@ -195,49 +216,46 @@ async function analizar(interaction) {
     embeds.push(embedBase({
       color: COLORES.denegado,
       titulo: `Faltantes (${faltantes.length})`,
-      descripcion: truncar(faltantes.slice(0, 25).map((f) => `· ${f.nombreRol || f.nombre}`).join('\n')),
-      footer: 'Usa Crear roles faltantes',
+      descripcion: truncar(
+        faltantes.slice(0, 30).map((f) => `· ${nombreOficial(f)}`).join('\n')
+      ),
+      footer: 'Usa Desplegar organigrama',
       timestamp: false,
     }));
   }
 
   auditoria.registrar(interaction.user.id, 'CONFIG_ROLES.ANALIZAR', {
-    detectados: detectados.length, faltantes: faltantes.length,
+    detectados: detectados.length,
+    faltantes: faltantes.length,
   });
   await interaction.editReply({ embeds: embeds.slice(0, 8), components: [] });
 }
 
-async function onCrearConfirmar(interaction) {
+async function onDesplegarConfirmar(interaction) {
   await interaction.guild.roles.fetch();
-  const { faltantes } = escanear(interaction.guild);
+  const { faltantes, detectados } = escanear(interaction.guild);
+  const total = faltantes.length + detectados.length;
 
-  if (!faltantes.length) {
-    const payload = {
-      embeds: [embedBase({
-        color: COLORES.medicina,
-        titulo: 'Crear roles',
-        descripcion: 'No hay faltantes. Todo el organigrama ya existe por nombre.',
-        footer: 'Administracion',
-      })],
-      components: [],
-    };
-    if (interaction.isStringSelectMenu()) await interaction.update(payload).catch(() => {});
-    else await interaction.reply({ ...payload, flags: MessageFlags.Ephemeral }).catch(() => {});
-    return;
-  }
-
-  const preview = faltantes.slice(0, 25).map((f) => `· ${f.nombreRol || f.nombre}`).join('\n');
   const payload = {
     embeds: [embedBase({
       color: COLORES.neutral,
-      titulo: `Crear ${faltantes.length} roles`,
-      descripcion: `Se crearan con formato **XX ●┇Nombre**.\n\n${preview}${faltantes.length > 25 ? `\n… +${faltantes.length - 25}` : ''}`,
+      titulo: 'Desplegar organigrama',
+      descripcion: [
+        `Se crearan **${faltantes.length}** roles faltantes`,
+        `(separadores, cargos y permisos).`,
+        `Ya existen: **${detectados.length}** / total catalogo: **${total}**.`,
+        '',
+        'Despues se ordenaran automaticamente en la jerarquia.',
+        '',
+        truncar(faltantes.slice(0, 20).map((f) => `· ${nombreOficial(f)}`).join('\n')),
+        faltantes.length > 20 ? `… +${faltantes.length - 20}` : '',
+      ].filter(Boolean).join('\n'),
       footer: 'Confirmacion',
     })],
     components: [new ActionRowBuilder().addComponents(
       new ButtonBuilder()
-        .setCustomId(`config_roles:crear_ejecutar:${interaction.user.id}`)
-        .setLabel(`Crear ${faltantes.length}`)
+        .setCustomId(`config_roles:desplegar_ejecutar:${interaction.user.id}`)
+        .setLabel(faltantes.length ? `Crear ${faltantes.length} y ordenar` : 'Solo ordenar')
         .setStyle(ButtonStyle.Success)
     )],
   };
@@ -245,61 +263,124 @@ async function onCrearConfirmar(interaction) {
   else await interaction.reply({ ...payload, flags: MessageFlags.Ephemeral }).catch(() => {});
 }
 
-async function onCrearEjecutar(interaction) {
+async function onCrearConfirmar(interaction) {
+  return onDesplegarConfirmar(interaction);
+}
+
+/** Crea faltantes y luego organiza. */
+async function onDesplegarEjecutar(interaction) {
   await interaction.update({
     embeds: [embedBase({
       color: COLORES.neutral,
-      titulo: 'Creando roles',
-      descripcion: 'Procesando. No pulses de nuevo.',
+      titulo: 'Desplegando organigrama',
+      descripcion: 'Creando roles y ordenando. No pulses de nuevo.',
       footer: 'Administracion',
     })],
     components: [],
-  }).catch(async () => { await interaction.deferUpdate().catch(() => {}); });
+  }).catch(async () => {
+    await interaction.deferUpdate().catch(() => {});
+  });
 
   const guild = interaction.guild;
   if (!guild.members.me?.permissions?.has(PermissionFlagsBits.ManageRoles)) {
     await interaction.editReply({
-      embeds: [embedBase({ color: COLORES.denegado, titulo: 'Sin permiso', descripcion: 'Se necesita **Manage Roles**.', footer: 'Administracion' })],
+      embeds: [embedBase({
+        color: COLORES.denegado,
+        titulo: 'Sin permiso',
+        descripcion: 'El bot necesita **Manage Roles** y su rol debe estar por encima de los roles que crea.',
+        footer: 'Administracion',
+      })],
       components: [],
     });
     return;
   }
 
   await guild.roles.fetch();
-  const { faltantes } = escanear(guild);
+  let { faltantes } = escanear(guild);
   let creados = 0;
   const errores = [];
 
   for (const item of faltantes) {
     try {
-      const nombre = item.nombreRol || item.nombre;
+      const nombre = nombreOficial(item);
+      // Discord limita nombres a 100 caracteres
+      const nombreFinal = String(nombre).slice(0, 100);
       const colorInt = parseInt(String(item.color || '#888780').replace('#', ''), 16);
       const rol = await guild.roles.create({
-        name: nombre,
+        name: nombreFinal,
         color: Number.isFinite(colorInt) ? colorInt : 0x888780,
         hoist: false,
         mentionable: false,
-        reason: `Aegis · crear organigrama · ${interaction.user.tag}`,
+        reason: `Aegis · desplegar organigrama · ${interaction.user.tag}`,
       });
       guardarMapa(item.key, rol.id, rol.name, 'bot');
       creados++;
-      await new Promise((r) => setTimeout(r, 350));
+      await new Promise((r) => setTimeout(r, 400));
     } catch (err) {
-      errores.push(item.nombreRol || item.nombre || item.key);
-      console.error('[Crear rol]', err.message || err);
+      errores.push(nombreOficial(item));
+      console.error('[Crear rol]', nombreOficial(item), err.message || err);
     }
   }
 
-  auditoria.registrar(interaction.user.id, 'CONFIG_ROLES.CREAR', { creados, errores: errores.length });
+  // Re-fetch y organizar
+  await guild.roles.fetch();
+  const { detectados } = escanear(guild);
+  const ordenados = [...detectados].sort(
+    (a, b) => (a.item.orden || 999) - (b.item.orden || 999)
+  );
+
+  const botPos = guild.members.me.roles.highest.position;
+  let pos = botPos - 1;
+  let movidos = 0;
+  let fallosPos = 0;
+
+  for (const d of ordenados) {
+    const rol = guild.roles.cache.get(d.rol.id);
+    if (!rol || !rol.editable || rol.position >= botPos) {
+      fallosPos++;
+      continue;
+    }
+    try {
+      if (pos < 1) break;
+      await rol.setPosition(pos, {
+        reason: `Aegis · organizar · ${interaction.user.tag}`,
+      });
+      pos--;
+      movidos++;
+      await new Promise((r) => setTimeout(r, 400));
+    } catch (err) {
+      fallosPos++;
+      console.error('[Organizar]', rol.name, err.message || err);
+    }
+  }
+
+  auditoria.registrar(interaction.user.id, 'CONFIG_ROLES.DESPLEGAR', {
+    creados,
+    errores: errores.length,
+    movidos,
+    fallosPos,
+  });
+
   await interaction.editReply({
     embeds: [embedBase({
       color: COLORES.medicina,
-      titulo: 'Roles creados',
-      descripcion: `Creados: **${creados}**${errores.length ? `\nErrores: ${errores.length}` : ''}\n\nUsa **Organizar jerarquia** para ordenarlos.`,
+      titulo: 'Organigrama desplegado',
+      descripcion: [
+        `Roles creados: **${creados}**`,
+        errores.length ? `Errores al crear: **${errores.length}**` : null,
+        `Roles ordenados: **${movidos}**`,
+        fallosPos ? `Sin mover (jerarquia del bot): **${fallosPos}**` : null,
+        '',
+        'El rol del bot debe quedar **por encima** de todos los roles del organigrama.',
+      ].filter((x) => x !== null && x !== undefined).join('\n'),
       footer: 'Administracion',
     })],
     components: [],
   });
+}
+
+async function onCrearEjecutar(interaction) {
+  return onDesplegarEjecutar(interaction);
 }
 
 async function onOrganizarConfirmar(interaction) {
@@ -307,7 +388,8 @@ async function onOrganizarConfirmar(interaction) {
     embeds: [embedBase({
       color: COLORES.neutral,
       titulo: 'Organizar jerarquia',
-      descripcion: 'Coloca cada rol del organigrama en su seccion (Gerente SI encima de Director General).',
+      descripcion:
+        'Coloca cada rol del organigrama en su seccion (Fundacion arriba, luego Direcciones, Moderacion, etc.).',
       footer: 'Confirmacion',
     })],
     components: [new ActionRowBuilder().addComponents(
@@ -323,14 +405,26 @@ async function onOrganizarConfirmar(interaction) {
 
 async function onOrganizarEjecutar(interaction) {
   await interaction.update({
-    embeds: [embedBase({ color: COLORES.neutral, titulo: 'Organizando', descripcion: 'Procesando…', footer: 'Administracion' })],
+    embeds: [embedBase({
+      color: COLORES.neutral,
+      titulo: 'Organizando',
+      descripcion: 'Procesando…',
+      footer: 'Administracion',
+    })],
     components: [],
-  }).catch(async () => { await interaction.deferUpdate().catch(() => {}); });
+  }).catch(async () => {
+    await interaction.deferUpdate().catch(() => {});
+  });
 
   const guild = interaction.guild;
   if (!guild.members.me?.permissions?.has(PermissionFlagsBits.ManageRoles)) {
     await interaction.editReply({
-      embeds: [embedBase({ color: COLORES.denegado, titulo: 'Sin permiso', descripcion: 'Se necesita **Manage Roles**.', footer: 'Administracion' })],
+      embeds: [embedBase({
+        color: COLORES.denegado,
+        titulo: 'Sin permiso',
+        descripcion: 'Se necesita **Manage Roles**.',
+        footer: 'Administracion',
+      })],
       components: [],
     });
     return;
@@ -338,7 +432,10 @@ async function onOrganizarEjecutar(interaction) {
 
   await guild.roles.fetch();
   const { detectados } = escanear(guild);
-  const ordenados = [...detectados].sort((a, b) => (a.item.orden || 999) - (b.item.orden || 999));
+  const ordenados = [...detectados].sort(
+    (a, b) => (a.item.orden || 999) - (b.item.orden || 999)
+  );
+
   const botPos = guild.members.me.roles.highest.position;
   let pos = botPos - 1;
   let movidos = 0;
@@ -346,10 +443,15 @@ async function onOrganizarEjecutar(interaction) {
 
   for (const d of ordenados) {
     const rol = guild.roles.cache.get(d.rol.id);
-    if (!rol || !rol.editable || rol.position >= botPos) { fallos++; continue; }
+    if (!rol || !rol.editable || rol.position >= botPos) {
+      fallos++;
+      continue;
+    }
     try {
       if (pos < 1) break;
-      await rol.setPosition(pos, { reason: `Aegis · organizar · ${interaction.user.tag}` });
+      await rol.setPosition(pos, {
+        reason: `Aegis · organizar · ${interaction.user.tag}`,
+      });
       pos--;
       movidos++;
       await new Promise((r) => setTimeout(r, 400));
