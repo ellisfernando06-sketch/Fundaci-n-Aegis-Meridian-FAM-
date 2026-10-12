@@ -83,8 +83,24 @@ const ROLES_PERMISOS = [
   { key: 'PERM.N4', nombreRol: 'Nivel 4 · Alto Secreto', orden: 385, color: '#E67E22', aliases: ['nivel 4', 'nivel 4 alto secreto'] },
   { key: 'PERM.N5', nombreRol: 'Nivel 5 · Meridiano', orden: 386, color: '#7F77DD', aliases: ['nivel 5', 'nivel 5 meridiano'] },
   { key: 'PERM.VERIFICADO', nombreRol: 'Verificado en Roblox', orden: 387, color: '#3BA55D', aliases: ['verificado en roblox', 'verificado'] },
-  { key: 'PERM.SUSPENDIDO', nombreRol: 'Suspendido', orden: 388, color: '#E24B4A', aliases: ['suspendido'] },
-  { key: 'PERM.VISITANTE', nombreRol: 'Visitante', orden: 389, color: '#888780', aliases: ['visitante'] },
+  { key: 'PERM.MIEMBRO', nombreRol: 'Miembro', orden: 388, color: '#3BA55D', aliases: ['miembro', 'member'] },
+  { key: 'PERM.SUSPENDIDO', nombreRol: 'Suspendido', orden: 389, color: '#E24B4A', aliases: ['suspendido'] },
+  { key: 'PERM.VISITANTE', nombreRol: 'Visitante', orden: 390, color: '#888780', aliases: ['visitante'] },
+];
+
+/** Roles de area (se reflejan al asignar area) */
+const ROLES_AREA = [
+  { key: 'AREA.fundacion', nombreRol: 'Area · Fundacion', orden: 391, color: '#F0B232' },
+  { key: 'AREA.direcciones', nombreRol: 'Area · Direcciones', orden: 392, color: '#5865F2' },
+  { key: 'AREA.moderacion', nombreRol: 'Area · Moderacion', orden: 393, color: '#E67E22' },
+  { key: 'AREA.soporte', nombreRol: 'Area · Soporte', orden: 394, color: '#3BA55D' },
+  { key: 'AREA.cupula', nombreRol: 'Area · Cupula', orden: 395, color: '#7F77DD' },
+  { key: 'AREA.seguridad_interna', nombreRol: 'Area · Seguridad Interna', orden: 396, color: '#7F77DD' },
+  { key: 'AREA.seguridad', nombreRol: 'Area · Seguridad', orden: 397, color: '#378ADD' },
+  { key: 'AREA.medicina', nombreRol: 'Area · Medicina', orden: 398, color: '#3BA55D' },
+  { key: 'AREA.investigacion', nombreRol: 'Area · Investigacion', orden: 399, color: '#5865F2' },
+  { key: 'AREA.inteligencia', nombreRol: 'Area · Inteligencia', orden: 400, color: '#7F77DD' },
+  { key: 'AREA.clase_d', nombreRol: 'Area · Clase D', orden: 401, color: '#888780' },
 ];
 
 /** Roles de llave (categoria KEYS) · se crean con /config_roles o /config_llaves */
@@ -99,7 +115,7 @@ function construirRolesLlaves() {
   return lista.map((l, i) => ({
     key: l.id,
     nombreRol: `[KEY] ${l.nombre}`,
-    orden: 401 + i,
+    orden: 420 + i,
     color: '#D4A017',
     aliases: [
       String(l.nombre || '').toLowerCase(),
@@ -116,9 +132,9 @@ const ROLES_LLAVES = construirRolesLlaves();
 const ROLES_IGNORAR = ['bot oficial', 'bots', 'bot', '@everyone'];
 
 const ROLES_APOYO = {
-  areas: [],
+  areas: ROLES_AREA.map((a) => a.nombreRol),
   autorizacion: ROLES_PERMISOS.filter((p) => p.key.startsWith('PERM.N')).map((p) => p.nombreRol),
-  estado: ['Verificado en Roblox', 'Suspendido', 'Visitante'],
+  estado: ['Verificado en Roblox', 'Miembro', 'Suspendido', 'Visitante'],
   administracion: [],
 };
 
@@ -171,6 +187,7 @@ function getJerarquiaCompleta() {
   for (const sep of SEPARADORES) items.push({ ...sep, tipo: 'separador', nombreRol: sep.nombreRol });
   for (const c of getTodosCargos()) items.push(c);
   for (const p of ROLES_PERMISOS) items.push({ ...p, tipo: 'permiso', prefijo: null });
+  for (const a of ROLES_AREA) items.push({ ...a, tipo: 'area', prefijo: 'AREA' });
   for (const k of ROLES_LLAVES) items.push({ ...k, tipo: 'llave', prefijo: 'KEY' });
   items.sort((a, b) => (a.orden || 999) - (b.orden || 999));
   return items;
@@ -178,7 +195,7 @@ function getJerarquiaCompleta() {
 
 function getOrganigramaTexto() {
   const lineas = [];
-  const items = getJerarquiaCompleta().filter((i) => i.tipo !== 'permiso');
+  const items = getJerarquiaCompleta().filter((i) => i.tipo !== 'permiso' && i.tipo !== 'llave' && i.tipo !== 'area');
   for (const item of items) {
     if (item.tipo === 'separador') {
       lineas.push(`\n**${item.nombreRol}**`);
@@ -220,6 +237,7 @@ module.exports = {
   SEPARADORES,
   ROLES_PERMISOS,
   ROLES_LLAVES,
+  ROLES_AREA,
   ROLES_IGNORAR,
   ROLES_APOYO,
   SITIOS_DEFAULT,
