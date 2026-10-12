@@ -2,7 +2,6 @@ const { EmbedBuilder } = require('discord.js');
 
 /**
  * Utilidades de plantillas de la Fundación Aegis-Meridian
- * Todas las respuestas visibles usan una de estas plantillas.
  */
 
 const COLORES = {
@@ -20,31 +19,69 @@ const COLORES = {
   naranja: 0xe67e22,
   rojo: 0xe24b4a,
   negro: 0x1a1a1a,
+  institucional: 0x0f0f1a,
+  oro: 0xc9a227,
+};
+
+const MARCA = {
+  nombre: 'Fundación Aegis-Meridian',
+  lema: 'Custodes Veritatis',
 };
 
 function pie(contexto) {
-  return `Fundación Aegis-Meridian · ${contexto}`;
+  return `${MARCA.nombre} · ${contexto}`;
 }
 
-function embedBase({ color, titulo, descripcion = null, campos = [], footer = null, thumbnail = null, timestamp = true }) {
+/**
+ * Embed institucional.
+ * footerIcon / thumbnail / image: URLs https
+ * author: { name, iconURL, url }
+ */
+function embedBase({
+  color,
+  titulo,
+  descripcion = null,
+  campos = [],
+  footer = null,
+  footerIcon = null,
+  thumbnail = null,
+  image = null,
+  author = null,
+  timestamp = true,
+}) {
   const embed = new EmbedBuilder()
-    .setColor(color)
+    .setColor(color ?? COLORES.institucional)
     .setTitle(titulo);
 
   if (descripcion) embed.setDescription(descripcion);
   if (campos.length) embed.addFields(campos);
-  if (footer) embed.setFooter({ text: pie(footer) });
+
+  if (author) {
+    embed.setAuthor({
+      name: author.name || MARCA.nombre,
+      iconURL: author.iconURL || undefined,
+      url: author.url || undefined,
+    });
+  }
+
+  if (footer) {
+    embed.setFooter({
+      text: pie(footer),
+      iconURL: footerIcon || undefined,
+    });
+  }
+
   if (thumbnail) embed.setThumbnail(thumbnail);
+  if (image) embed.setImage(image);
   if (timestamp) embed.setTimestamp();
 
   return embed;
 }
 
-/** Acceso denegado */
 function accesoDenegado({ recurso, nivelRequerido, nivelActual }) {
   return embedBase({
     color: COLORES.denegado,
-    titulo: '🚫 Acceso denegado',
+    titulo: 'Acceso denegado',
     campos: [
       { name: 'Recurso solicitado', value: recurso || '—', inline: true },
       { name: 'Nivel requerido', value: String(nivelRequerido ?? '—'), inline: true },
@@ -54,7 +91,6 @@ function accesoDenegado({ recurso, nivelRequerido, nivelActual }) {
   });
 }
 
-/** Listado genérico paginado */
 function listado({ tema, filas, pagina = 1, totalPaginas = 1 }) {
   const texto = filas.length
     ? filas.map((f) => `**${f.id}** · ${f.titulo} · ${f.estado} · ${f.fecha}`).join('\n')
@@ -62,17 +98,16 @@ function listado({ tema, filas, pagina = 1, totalPaginas = 1 }) {
 
   return embedBase({
     color: COLORES.neutral,
-    titulo: `📚 Listado · ${tema}`,
+    titulo: `Listado · ${tema}`,
     descripcion: texto,
     footer: `Página ${pagina} de ${totalPaginas}`,
   });
 }
 
-/** Configuración */
 function configuracion({ ajuste, valorAnterior, valorNuevo, cambiadoPor }) {
   return embedBase({
     color: COLORES.neutral,
-    titulo: '⚙️ Configuración',
+    titulo: 'Configuración',
     campos: [
       { name: 'Ajuste', value: ajuste, inline: true },
       { name: 'Valor anterior', value: valorAnterior || '—', inline: true },
@@ -85,6 +120,7 @@ function configuracion({ ajuste, valorAnterior, valorNuevo, cambiadoPor }) {
 
 module.exports = {
   COLORES,
+  MARCA,
   pie,
   embedBase,
   accesoDenegado,
