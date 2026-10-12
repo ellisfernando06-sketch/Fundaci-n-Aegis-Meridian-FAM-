@@ -1,20 +1,62 @@
 /**
- * Despliegue de categorias y canales + enlace a llaves.
+ * Despliegue: borra plantilla Aegis anterior y crea de nuevo con emojis actualizados.
  */
 
 const {
   ChannelType,
   PermissionFlagsBits,
-  PermissionsBitField,
 } = require('discord.js');
 const { getDb, setConfig, getConfig } = require('../db');
-const { ESTRUCTURA } = require('../data/canales');
+const { ESTRUCTURA, esCanalPlantillaAegis } = require('../data/canales');
 const auditoria = require('./auditoria');
 
-const DENY_EVERYONE = [
-  PermissionFlagsBits.ViewChannel,
-  PermissionFlagsBits.Connect,
-];
+async function borrarPlantillaAnterior(guild) {
+  await guild.channels.fetch().catch(() => {});
+  let borrados = 0;
+
+  const noCat = [...guild.channels.cache.values()].filter(
+    (ch) => ch.type !== ChannelType.GuildCategory
+  );
+
+  for (const ch of noCat) {
+    if (!esCanalPlantillaAegis(ch.name)) continue;
+    try {
+      await ch.delete('Aegis · redespliegue de plantilla');
+      borrados += 1;
+    } catch (err) {
+      console.error('[Canales] No se pudo borrar', ch.name, err.message);
+    }
+  }
+
+  await guild.channels.fetch().catch(() => {});
+  const cats = [...guild.channels.cache.values()].filter(
+    (ch) => ch.type === ChannelType.GuildCategory && esCanalPlantillaAegis(ch.name)
+  );
+
+  for (const cat of cats) {
+    try {
+      const hijos = guild.channels.cache.filter((c) => c.parentId === cat.id);
+      for (const h of hijos.values()) {
+        await h.delete('Aegis · redespliegue').catch(() => {});
+        borrados += 1;
+      }
+      await cat.delete('Aegis · redespliegue de plantilla');
+      borrados += 1;
+    } catch (err) {
+      console.error('[Canales] No se pudo borrar categoria', cat.name, err.message);
+    }
+  }
+
+  const db = getDb();
+  try {
+    db.prepare("DELETE FROM roles_map WHERE cargo_key LIKE 'CHMAP.%'").run();
+  } catch (_) {}
+  try {
+    db.prepare("UPDATE llaves SET canales_json = '[]'").run();
+  } catch (_) {}
+
+  return borrados;
+}
 
 async function asegurarCategoria(guild, nombre, existingByName) {
   const found = existingByName.get(nombre.toLowerCase());
@@ -82,14 +124,13 @@ async function asegurarVoz(guild, parent, def, existingByName) {
   });
 }
 
-function mapearCanalEnDb(canalKey, channelId, tipo) {
+function mapearCanalEnDb(canalKey, channelId) {
   const db = getDb();
   db.prepare(`
     INSERT INTO roles_map (cargo_key, role_id)
     VALUES (?, ?)
     ON CONFLICT(cargo_key) DO UPDATE SET role_id = excluded.role_id
   `).run(`CHMAP.${canalKey}`, channelId);
-  // Nota: roles_map se reutiliza como mapa generico key→id de discord
 }
 
 function enlazarKeysACanal(channelId, keyIds) {
@@ -107,23 +148,23 @@ function enlazarKeysACanal(channelId, keyIds) {
   }
 }
 
-/**
- * Crea toda la estructura. Idempotente: no duplica por nombre.
- */
 async function desplegarEstructura(guild, actorTag) {
-  await guild.channels.fetch().catch(() => {});
-  const existingByName = new Map();
-  for (const ch of guild.channels.cache.values()) {
-    existingByName.set(ch.name.toLowerCase(), ch);
-  }
-
   const resumen = {
+    borrados: 0,
     categorias: 0,
     textos: 0,
     voces: 0,
     keysEnlazadas: 0,
     errores: [],
   };
+
+  resumen.borrados = await borrarPlantillaAnterior(guild);
+
+  await guild.channels.fetch().catch(() => {});
+  const existingByName = new Map();
+  for (const ch of guild.channels.cache.values()) {
+    existingByName.set(ch.name.toLowerCase(), ch);
+  }
 
   for (const cat of ESTRUCTURA) {
     let categoria;
@@ -140,7 +181,7 @@ async function desplegarEstructura(guild, actorTag) {
       try {
         const ch = await asegurarTexto(guild, categoria, def, existingByName);
         existingByName.set(ch.name.toLowerCase(), ch);
-        mapearCanalEnDb(def.key, ch.id, 'text');
+        mapearCanalEnDb(def.key, ch.id);
         if (def.configKey) setConfig(def.configKey, ch.id);
         if (def.keys?.length) {
           enlazarKeysACanal(ch.id, def.keys);
@@ -156,7 +197,7 @@ async function desplegarEstructura(guild, actorTag) {
       try {
         const ch = await asegurarVoz(guild, categoria, def, existingByName);
         existingByName.set(ch.name.toLowerCase(), ch);
-        mapearCanalEnDb(def.key, ch.id, 'voice');
+        mapearCanalEnDb(def.key, ch.id);
         resumen.voces += 1;
       } catch (err) {
         resumen.errores.push(`${def.nombre}: ${err.message}`);
@@ -164,7 +205,6 @@ async function desplegarEstructura(guild, actorTag) {
     }
   }
 
-  // Asegurar canal_solicitudes si existe el canal creado
   const sol = getConfig('canal_solicitudes');
   if (sol) setConfig('canal_logs_cofundadores', sol);
 
@@ -178,5 +218,6 @@ async function desplegarEstructura(guild, actorTag) {
 
 module.exports = {
   desplegarEstructura,
+  borrarPlantillaAnterior,
   ESTRUCTURA,
 };
