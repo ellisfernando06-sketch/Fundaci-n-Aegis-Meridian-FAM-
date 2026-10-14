@@ -8,8 +8,10 @@ const { getDb } = require('../db');
 const {
   getTodosCargos,
   getCargoPorKey,
+  getJerarquiaCompleta,
   ROLES_PERMISOS,
   ORGANIGRAMA,
+  nombreBaseRol,
 } = require('../data/organigrama');
 const auditoria = require('./auditoria');
 
@@ -29,37 +31,131 @@ const ESTADO = {
 
 const NIVELES_KEYS = ['PERM.N0', 'PERM.N1', 'PERM.N2', 'PERM.N3', 'PERM.N4', 'PERM.N5'];
 
-function roleIdDeCargo(cargoKey) {
-  const row = getDb().prepare('SELECT role_id FROM roles_map WHERE cargo_key = ?').get(cargoKey);
-  return row?.role_id || null;
+function normalizar(s) {
+  return String(s || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
 }
 
-function roleIdDePermiso(key) {
-  return roleIdDeCargo(key);
+function guardarMapa(cargoKey, roleId, nombreRol) {
+  try {
+    getDb().prepare(`
+      INSERT INTO roles_map (cargo_key, role_id, nombre_rol)
+      VALUES (?, ?, ?)
+      ON CONFLICT(cargo_key) DO UPDATE SET
+        role_id = excluded.role_id,
+        nombre_rol = excluded.nombre_rol,
+        actualizado_en = datetime('now')
+    `).run(cargoKey, roleId, nombreRol);
+  } catch (err) {
+    console.warn('[roles_map]', err.message);
+  }
+}
+
+function itemCatalogo(key) {
+  if (!key) return null;
+  const cargo = getCargoPorKey(key);
+  if (cargo) return cargo;
+  const jer = getJerarquiaCompleta().find((i) => i.key === key);
+  return jer || null;
+}
+
+/**
+ * Resuelve role_id: 1) roles_map 2) nombre oficial / base en el servidor.
+ * Si lo encuentra por nombre, lo guarda en el mapa.
+ */
+function roleIdDeCargo(cargoKey, guild = null) {
+  const row = getDb().prepare('SELECT role_id FROM roles_map WHERE cargo_key = ?').get(cargoKey);
+  if (row?.role_id) return row.role_id;
+
+  if (!guild) return null;
+
+  const item = itemCatalogo(cargoKey);
+  if (!item) return null;
+
+  const oficial = normalizar(item.nombreRol || item.nombre || '');
+  const base = normalizar(item.nombre || nombreBaseRol?.(item.nombreRol) || '');
+
+  for (const [, rol] of guild.roles.cache) {
+    if (rol.managed || rol.id === guild.id) continue;
+    const n = normalizar(rol.name);
+    const nb = normalizar(nombreBaseRol ? nombreBaseRol(rol.name) : rol.name);
+    if (
+      (oficial && (n === oficial || nb === oficial)) ||
+      (base && (nb === base || n.includes(base)))
+    ) {
+      guardarMapa(cargoKey, rol.id, rol.name);
+      return rol.id;
+    }
+  }
+  return null;
+}
+
+function roleIdDePermiso(key, guild = null) {
+  return roleIdDeCargo(key, guild);
 }
 
 function areaKey(area) {
   if (!area) return null;
-  return `AREA.${String(area).toLowerCase()}`;
+  const raw = String(area).trim();
+  const lower = raw.toLowerCase();
+
+  if (ORGANIGRAMA[lower]) return `AREA.${lower}`;
+
+  for (const [k, rama] of Object.entries(ORGANIGRAMA)) {
+    if (normalizar(rama.nombre) === normalizar(raw)) return `AREA.${k}`;
+  }
+
+  const sinPrefijo = lower.replace(/^area[\.\s·]+/i, '').trim();
+  if (ORGANIGRAMA[sinPrefijo]) return `AREA.${sinPrefijo}`;
+
+  return `AREA.${sinPrefijo.replace(/\s+/g, '_')}`;
 }
 
 async function addRoleByKey(guild, member, key, reason) {
-  const id = roleIdDeCargo(key);
-  if (!id) return false;
-  const rol = guild.roles.cache.get(id);
-  if (!rol || !rol.editable) return false;
-  if (!member.roles.cache.has(id)) {
-    await member.roles.add(rol, reason).catch(() => {});
+  if (!guild || !member || !key) return { ok: false, motivo: 'parametros' };
+
+  const id = roleIdDeCargo(key, guild);
+  if (!id) {
+    console.warn('[roles] sin role_id para', key);
+    return { ok: false, motivo: 'sin_mapa', key };
   }
-  return true;
+
+  const rol = guild.roles.cache.get(id);
+  if (!rol) return { ok: false, motivo: 'rol_inexistente', key, id };
+
+  const me = guild.members.me;
+  if (!rol.editable || (me && rol.position >= me.roles.highest.position)) {
+    console.warn('[roles] no editable / jerarquia', key, rol.name);
+    return { ok: false, motivo: 'jerarquia', key, nombre: rol.name };
+  }
+
+  if (!member.roles.cache.has(id)) {
+    try {
+      await member.roles.add(rol, reason || `Aegis · ${key}`);
+    } catch (err) {
+      console.error('[roles] add', key, err.message);
+      return { ok: false, motivo: err.message, key };
+    }
+  }
+  return { ok: true, key, id, nombre: rol.name };
 }
 
 async function removeRoleByKey(guild, member, key, reason) {
-  const id = roleIdDeCargo(key);
+  if (!guild || !member || !key) return false;
+  const id = roleIdDeCargo(key, guild);
   if (!id || !member.roles.cache.has(id)) return false;
   const rol = guild.roles.cache.get(id);
   if (!rol || !rol.editable) return false;
-  await member.roles.remove(rol, reason).catch(() => {});
+  try {
+    await member.roles.remove(rol, reason || `Aegis · quitar ${key}`);
+  } catch (err) {
+    console.error('[roles] remove', key, err.message);
+    return false;
+  }
   return true;
 }
 
@@ -138,12 +234,29 @@ async function asignarCargo(guild, member, cargoKey, actorTag, motivo = null) {
   const rangoAnterior = perfil?.cargo || null;
 
   await quitarRolesDeOrganigrama(member);
-  const roleId = roleIdDeCargo(cargoKey);
-  if (roleId) {
-    const rol = guild.roles.cache.get(roleId);
-    if (rol && rol.editable) {
-      await member.roles.add(rol, `Aegis · cargo ${cargo.nombre} · ${actorTag}`);
+
+  const otorgado = await addRoleByKey(
+    guild,
+    member,
+    cargoKey,
+    `Aegis · cargo ${cargo.nombre} · ${actorTag}`
+  );
+
+  if (!otorgado.ok) {
+    if (otorgado.motivo === 'sin_mapa') {
+      throw new Error(
+        `No hay rol Discord mapeado para «${cargo.nombre}». ` +
+        'Ejecuta /config_roles → Crear roles (y Ordenar). ' +
+        'El rol del bot debe quedar por encima del cargo.'
+      );
     }
+    if (otorgado.motivo === 'jerarquia') {
+      throw new Error(
+        `El bot no puede asignar «${otorgado.nombre || cargo.nombre}» ` +
+        '(jerarquia: sube el rol del bot por encima de ese cargo).'
+      );
+    }
+    throw new Error(`No se pudo otorgar el rol: ${otorgado.motivo}`);
   }
 
   if (cargo.rama) {
@@ -162,50 +275,131 @@ async function asignarCargo(guild, member, cargoKey, actorTag, motivo = null) {
   db.prepare(`
     INSERT INTO historial_personal (numero, discord_id, tipo, area, rango_anterior, rango_nuevo, autorizado_por, motivo)
     VALUES (?, ?, 'asignacion', ?, ?, ?, ?, ?)
-  `).run(num, member.id, cargo.nombreRama || cargo.rama, rangoAnterior, cargo.nombre, actorTag, motivo || 'Asignacion de cargo');
+  `).run(
+    num,
+    member.id,
+    cargo.nombreRama || cargo.rama,
+    rangoAnterior,
+    cargo.nombre,
+    actorTag,
+    motivo || 'Asignacion de cargo'
+  );
 
-  auditoria.registrar(member.id, 'CARGO.ASIGNAR', { cargoKey, actor: actorTag, motivo });
-  return { cargo, numeroHistorial: num };
+  auditoria.registrar(member.id, 'CARGO.ASIGNAR', {
+    cargoKey,
+    actor: actorTag,
+    motivo,
+    rolDiscord: otorgado.nombre,
+  });
+
+  return {
+    cargo,
+    numeroHistorial: num,
+    rangoAnterior,
+    rolOtorgado: otorgado.nombre,
+    rolId: otorgado.id,
+  };
 }
 
-async function setAutorizacion(guild, member, nivel, actorTag) {
+async function setAutorizacion(guild, member, nivel, actorTag, motivo = null) {
   const n = Number(nivel);
   if (Number.isNaN(n) || n < 0 || n > 5) throw new Error('Nivel invalido');
 
-  await quitarRolesDeNivel(member);
-  await addRoleByKey(guild, member, `PERM.N${n}`, `Aegis · autorizacion N${n} · ${actorTag}`);
+  const perfil = asegurarPerfil(member.id);
+  const anterior = perfil?.nivel_auth ?? 0;
 
-  getDb().prepare(`UPDATE perfiles SET nivel_auth = ?, actualizado_en = datetime('now') WHERE discord_id = ?`).run(n, member.id);
-  auditoria.registrar(member.id, 'AUTH.OTORGAR', { nivel: n, actor: actorTag });
-  return { nivel: n };
+  await quitarRolesDeNivel(member);
+  const otorgado = await addRoleByKey(
+    guild,
+    member,
+    `PERM.N${n}`,
+    `Aegis · autorizacion N${n} · ${actorTag}`
+  );
+
+  if (!otorgado.ok && otorgado.motivo === 'sin_mapa') {
+    throw new Error(
+      `No existe el rol de Nivel ${n}. Ejecuta /config_roles → Crear roles (permisos).`
+    );
+  }
+  if (!otorgado.ok && otorgado.motivo === 'jerarquia') {
+    throw new Error(`El bot no puede asignar el rol de Nivel ${n} (jerarquia).`);
+  }
+
+  getDb().prepare(
+    `UPDATE perfiles SET nivel_auth = ?, actualizado_en = datetime('now') WHERE discord_id = ?`
+  ).run(n, member.id);
+
+  auditoria.registrar(member.id, 'AUTH.OTORGAR', {
+    nivel: n,
+    anterior,
+    actor: actorTag,
+    motivo,
+  });
+
+  return { nivel: n, anterior, rolOtorgado: otorgado.nombre || null };
 }
 
 async function setArea(guild, member, area, actorTag) {
-  const key = String(area || '').toLowerCase();
-  if (!key) throw new Error('Area vacia');
+  if (!area) throw new Error('Area vacia');
+
+  const keyFull = areaKey(area);
+  if (!keyFull) throw new Error('Area no reconocida');
+
+  const ramaKey = keyFull.replace(/^AREA\./, '');
+  const nombreVisible = ORGANIGRAMA[ramaKey]?.nombre || ramaKey;
 
   await quitarRolesDeArea(member);
-  await addRoleByKey(guild, member, areaKey(key), `Aegis · area ${key} · ${actorTag}`);
+  const otorgado = await addRoleByKey(
+    guild,
+    member,
+    keyFull,
+    `Aegis · area ${nombreVisible} · ${actorTag}`
+  );
 
-  const nombreVisible = ORGANIGRAMA[key]?.nombre || key;
-  getDb().prepare(`UPDATE perfiles SET area = ?, actualizado_en = datetime('now') WHERE discord_id = ?`).run(nombreVisible, member.id);
-  auditoria.registrar(member.id, 'AREA.ASIGNAR', { area: key, actor: actorTag });
-  return { area: nombreVisible, key };
+  if (!otorgado.ok && otorgado.motivo === 'sin_mapa') {
+    throw new Error(
+      `No existe el rol de area «${nombreVisible}». ` +
+      'Ejecuta /config_roles → Crear roles.'
+    );
+  }
+
+  asegurarPerfil(member.id);
+  getDb().prepare(
+    `UPDATE perfiles SET area = ?, actualizado_en = datetime('now') WHERE discord_id = ?`
+  ).run(nombreVisible, member.id);
+
+  auditoria.registrar(member.id, 'AREA.ASIGNAR', {
+    area: ramaKey,
+    actor: actorTag,
+    rol: otorgado.nombre,
+  });
+
+  return {
+    area: nombreVisible,
+    key: ramaKey,
+    rolOtorgado: otorgado.nombre || null,
+  };
 }
 
 async function marcarVerificado(guild, member) {
   await addRoleByKey(guild, member, ESTADO.VERIFICADO, 'Aegis · Roblox verificado');
-  getDb().prepare(`UPDATE perfiles SET verificado = 1, actualizado_en = datetime('now') WHERE discord_id = ?`).run(member.id);
+  getDb().prepare(
+    `UPDATE perfiles SET verificado = 1, actualizado_en = datetime('now') WHERE discord_id = ?`
+  ).run(member.id);
 }
 
 async function aplicarSuspension(guild, member, actorTag) {
   await addRoleByKey(guild, member, ESTADO.SUSPENDIDO, `Aegis · sancion · ${actorTag}`);
-  getDb().prepare(`UPDATE perfiles SET estado = 'Suspendido', actualizado_en = datetime('now') WHERE discord_id = ?`).run(member.id);
+  getDb().prepare(
+    `UPDATE perfiles SET estado = 'Suspendido', actualizado_en = datetime('now') WHERE discord_id = ?`
+  ).run(member.id);
 }
 
 async function levantarSuspension(guild, member, actorTag) {
   await removeRoleByKey(guild, member, ESTADO.SUSPENDIDO, `Aegis · levantamiento · ${actorTag}`);
-  getDb().prepare(`UPDATE perfiles SET estado = 'Activo', actualizado_en = datetime('now') WHERE discord_id = ?`).run(member.id);
+  getDb().prepare(
+    `UPDATE perfiles SET estado = 'Activo', actualizado_en = datetime('now') WHERE discord_id = ?`
+  ).run(member.id);
 }
 
 async function otorgarLlave(guild, member, llaveId, actorTag, motivo = null) {
@@ -223,15 +417,28 @@ async function otorgarLlave(guild, member, llaveId, actorTag, motivo = null) {
     VALUES (?, ?, 'manual', ?, ?, 1)
   `).run(llaveId, member.id, actorTag, motivo || 'Otorgamiento manual');
 
-  let roleId = llave.role_id || roleIdDeCargo(llaveId);
+  let roleId = llave.role_id || roleIdDeCargo(llaveId, guild);
   if (!roleId && llave.nombre_rol) {
-    const found = guild.roles.cache.find((r) => r.name === llave.nombre_rol);
-    if (found) roleId = found.id;
+    const found = guild.roles.cache.find(
+      (r) => normalizar(r.name) === normalizar(llave.nombre_rol)
+    );
+    if (found) {
+      roleId = found.id;
+      guardarMapa(llaveId, found.id, found.name);
+    }
   }
+
+  let rolNombre = null;
   if (roleId) {
     const rol = guild.roles.cache.get(roleId);
     if (rol?.editable) {
-      await member.roles.add(rol, `Aegis · llave ${llave.id} · ${actorTag}`);
+      const me = guild.members.me;
+      if (!me || rol.position < me.roles.highest.position) {
+        await member.roles.add(rol, `Aegis · llave ${llave.id} · ${actorTag}`).catch((err) => {
+          console.error('[llave role]', err.message);
+        });
+        rolNombre = rol.name;
+      }
     }
     if (!llave.role_id) {
       db.prepare('UPDATE llaves SET role_id = ? WHERE id = ?').run(roleId, llaveId);
@@ -239,24 +446,38 @@ async function otorgarLlave(guild, member, llaveId, actorTag, motivo = null) {
   }
 
   let canales = [];
-  try { canales = JSON.parse(llave.canales_json || '[]'); } catch (_) { canales = []; }
+  try {
+    canales = JSON.parse(llave.canales_json || '[]');
+  } catch (_) {
+    canales = [];
+  }
   for (const channelId of canales) {
     const ch = guild.channels.cache.get(channelId);
     if (!ch || !ch.permissionOverwrites) continue;
     try {
-      await ch.permissionOverwrites.edit(member.id, {
-        ViewChannel: true,
-        SendMessages: true,
-        ReadMessageHistory: true,
-        EmbedLinks: true,
-      }, { reason: `Aegis · llave ${llave.id}` });
+      await ch.permissionOverwrites.edit(
+        member.id,
+        {
+          ViewChannel: true,
+          SendMessages: true,
+          ReadMessageHistory: true,
+          EmbedLinks: true,
+        },
+        { reason: `Aegis · llave ${llave.id}` }
+      );
     } catch (err) {
       console.error('[Llave overwrite]', channelId, err.message);
     }
   }
 
-  auditoria.registrar(member.id, 'LLAVE.OTORGAR', { llaveId, actor: actorTag, motivo });
-  return llave;
+  auditoria.registrar(member.id, 'LLAVE.OTORGAR', {
+    llaveId,
+    actor: actorTag,
+    motivo,
+    rol: rolNombre,
+  });
+
+  return { ...llave, rolOtorgado: rolNombre };
 }
 
 async function revocarLlave(guild, member, llaveId, actorTag) {
@@ -264,18 +485,24 @@ async function revocarLlave(guild, member, llaveId, actorTag) {
   const llave = db.prepare('SELECT * FROM llaves WHERE id = ?').get(llaveId);
   if (!llave) throw new Error('Llave no encontrada');
 
-  db.prepare(`UPDATE llaves_titulares SET activa = 0 WHERE llave_id = ? AND discord_id = ? AND activa = 1`).run(llaveId, member.id);
+  db.prepare(
+    `UPDATE llaves_titulares SET activa = 0 WHERE llave_id = ? AND discord_id = ? AND activa = 1`
+  ).run(llaveId, member.id);
 
-  const roleId = llave.role_id || roleIdDeCargo(llaveId);
+  const roleId = llave.role_id || roleIdDeCargo(llaveId, guild);
   if (roleId && member.roles.cache.has(roleId)) {
     const rol = guild.roles.cache.get(roleId);
     if (rol?.editable) {
-      await member.roles.remove(rol, `Aegis · revocar llave ${llaveId} · ${actorTag}`);
+      await member.roles.remove(rol, `Aegis · revocar llave ${llaveId} · ${actorTag}`).catch(() => {});
     }
   }
 
   let canales = [];
-  try { canales = JSON.parse(llave.canales_json || '[]'); } catch (_) { canales = []; }
+  try {
+    canales = JSON.parse(llave.canales_json || '[]');
+  } catch (_) {
+    canales = [];
+  }
   for (const channelId of canales) {
     const ch = guild.channels.cache.get(channelId);
     if (!ch || !ch.permissionOverwrites) continue;
