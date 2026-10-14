@@ -1,26 +1,72 @@
 /**
  * Prefijo ! — solo Fundador
- * !say texto   → el bot envía exactamente ese texto
- * !hablar texto (alias)
+ * Detecta el rol por mapa interno Y por nombre en Discord.
+ * !say texto → el bot envía exactamente ese texto
  */
 
-const { ChannelType } = require('discord.js');
 const { cargosMapeados } = require('../services/acceso');
 const auditoria = require('../services/auditoria');
+const { getDb } = require('../db');
 
 const PREFIX = '!';
 
+function normalizar(s) {
+  return String(s || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+/**
+ * ¿Es Fundador?
+ * 1) cargo mapeado ST.FUNDADOR
+ * 2) rol Discord cuyo nombre contenga "fundador" (sin ser cofundador)
+ * 3) roles_map: el role_id de ST.FUNDADOR está en el miembro
+ */
 function esFundador(message) {
-  if (!message.member) return false;
-  const cargos = new Set(cargosMapeados(message.member));
-  return cargos.has('ST.FUNDADOR');
+  const member = message.member;
+  if (!member) return false;
+
+  // 1) Mapa de cargos ya resuelto
+  try {
+    const cargos = new Set(cargosMapeados(member));
+    if (cargos.has('ST.FUNDADOR')) return true;
+  } catch (_) {}
+
+  // 2) roles_map directo
+  try {
+    const row = getDb().prepare("SELECT role_id FROM roles_map WHERE cargo_key = 'ST.FUNDADOR'").get();
+    if (row?.role_id && member.roles.cache.has(row.role_id)) return true;
+  } catch (_) {}
+
+  // 3) Por nombre del rol en Discord
+  for (const [, rol] of member.roles.cache) {
+    if (rol.managed || rol.id === message.guild?.id) continue;
+    const n = normalizar(rol.name);
+    // "fundador" pero no "cofundador" / "co fundador"
+    if (
+      (n === 'fundador' || n.includes(' fundador') || n.startsWith('fundador') || n.endsWith(' fundador')) &&
+      !n.includes('cofundador') &&
+      !n.includes('co fundador') &&
+      !/^co\s/.test(n)
+    ) {
+      return true;
+    }
+    // Prefijo del organigrama: "ST ●┇Fundador" o similar
+    if (n.includes('fundador') && !n.includes('cofundador') && !n.includes('co fundador')) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 function parseCanalYTexto(message, resto) {
   let canal = message.channel;
   let texto = resto;
 
-  // Opcional: !say #canal resto  (el resto se conserva tal cual, incluido espacios)
   const mention = resto.match(/^(<#(\d+)>)\s/);
   if (mention) {
     const ch = message.guild?.channels.cache.get(mention[2]);
@@ -46,32 +92,42 @@ async function manejarPrefijo(message) {
   if (message.author.bot || !message.guild) return;
   if (!message.content.startsWith(PREFIX)) return;
 
-  // Quitar solo el prefijo; conservar el resto del string original
   const afterPrefix = message.content.slice(PREFIX.length);
-  // Primer token = comando (sin importar mayúsculas)
   const match = afterPrefix.match(/^(\S+)(?:\s([\s\S]*))?$/);
   if (!match) return;
 
   const cmd = match[1].toLowerCase();
-  // Todo lo que sigue al comando, sin trim agresivo del contenido (solo un espacio de separación ya consumido)
   const resto = match[2] != null ? match[2] : '';
 
   if (!['say', 'hablar', 'decir'].includes(cmd)) return;
 
+  // Asegurar cache de roles del miembro
+  try {
+    await message.member.fetch(true);
+  } catch (_) {}
+
   if (!esFundador(message)) {
-    await message.reply({ content: 'Solo el **Fundador** puede usar este comando.' }).catch(() => {});
+    await message
+      .reply({
+        content:
+          'Solo el **Fundador** puede usar este comando.\n' +
+          'El bot no detecto el rol de Fundador en tu cuenta. ' +
+          'Comprueba que tengas el rol cuyo nombre incluya «Fundador» (no Cofundador).',
+      })
+      .catch(() => {});
     return;
   }
 
   const { canal, texto } = parseCanalYTexto(message, resto);
 
   if (!texto || !texto.length) {
-    await message.reply({ content: 'Uso: `!say` seguido del mensaje exacto que debe enviar el bot.' }).catch(() => {});
+    await message
+      .reply({ content: 'Uso: `!say` seguido del mensaje exacto.' })
+      .catch(() => {});
     return;
   }
 
   try {
-    // Envío literal (máx. 2000 chars de Discord)
     await canal.send({ content: texto.slice(0, 2000) });
     await message.delete().catch(() => {});
     auditoria.registrar(message.author.id, 'BOT.HABLAR', {
@@ -84,4 +140,4 @@ async function manejarPrefijo(message) {
   }
 }
 
-module.exports = { PREFIX, manejarPrefijo };
+module.exports = { PREFIX, manejarPrefijo, esFundador };
