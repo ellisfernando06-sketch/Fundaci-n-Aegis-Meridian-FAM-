@@ -106,11 +106,28 @@ module.exports = {
           embeds: [embedBase({
             color: COLORES.medicina,
             titulo: 'Cargo asignado',
+            descripcion:
+              'Se actualizo la ficha y se otorgaron los roles de Discord correspondientes.',
             campos: [
               { name: 'Miembro', value: `<@${member.id}>`, inline: true },
-              { name: 'Cargo', value: result.cargo.nombreRol || result.cargo.nombre, inline: true },
-              { name: 'Rol Discord', value: result.rolOtorgado || '—', inline: true },
-              { name: 'Anterior', value: result.rangoAnterior || '—', inline: true },
+              { name: 'Cargo (ficha)', value: result.cargo.nombre || '—', inline: true },
+              { name: 'Area (ficha)', value: result.area || '—', inline: true },
+              {
+                name: 'Rol Discord · cargo',
+                value: result.rolOtorgado || '—',
+                inline: true,
+              },
+              {
+                name: 'Rol Discord · area',
+                value: result.rolArea || '—',
+                inline: true,
+              },
+              {
+                name: 'Rol Discord · miembro',
+                value: result.rolMiembro || '—',
+                inline: true,
+              },
+              { name: 'Cargo anterior', value: result.rangoAnterior || '—', inline: true },
               { name: 'Historial', value: result.numeroHistorial || '—', inline: true },
               { name: 'Emitida por', value: interaction.user.tag, inline: true },
               { name: 'Motivo', value: motivo || '—', inline: false },
