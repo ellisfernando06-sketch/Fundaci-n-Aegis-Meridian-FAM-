@@ -100,6 +100,13 @@ function menuCargos(id, pagina = 0) {
   const totalPag = Math.max(1, Math.ceil(todos.length / pageSize));
   const p = Math.max(0, Math.min(pagina, totalPag - 1));
   const slice = todos.slice(p * pageSize, p * pageSize + pageSize);
+  if (!slice.length) {
+    return [
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(`postulacion:pagina:${id}:0`).setLabel('Sin cargos en organigrama').setStyle(ButtonStyle.Secondary).setDisabled(true),
+      ),
+    ];
+  }
   const select = new StringSelectMenuBuilder()
     .setCustomId(`postulacion:cargo:${id}:${p}`)
     .setPlaceholder(`Cargo a otorgar (pag. ${p + 1}/${totalPag})`)
@@ -157,23 +164,35 @@ async function handle(interaction, accion, args) {
     auditoria.registrar(interaction.user.id, 'POSTULACION.ENVIAR', { id, area });
     const row = getDb().prepare('SELECT * FROM postulaciones WHERE id = ?').get(id);
     let publicado = false;
+    let errorPub = null;
     if (interaction.guild) {
-      const ch = await interaction.guild.channels.fetch(CANAL_POSTULACIONES).catch(() => null);
-      if (ch?.isTextBased()) {
-        const msg = await ch.send({
-          content: `Nueva postulacion **${id}** · <@${interaction.user.id}>`,
-          embeds: [embedPostulacion(row)],
-          components: botonesRevision(id),
-        });
-        getDb().prepare('UPDATE postulaciones SET msg_id = ?, canal_id = ? WHERE id = ?').run(msg.id, ch.id, id);
-        publicado = true;
+      try {
+        const ch = await interaction.guild.channels.fetch(CANAL_POSTULACIONES).catch(() => null);
+        if (ch?.isTextBased()) {
+          const msg = await ch.send({
+            content: `Nueva postulacion **${id}** · <@${interaction.user.id}>`,
+            embeds: [embedPostulacion(row)],
+            components: botonesRevision(id),
+          });
+          getDb().prepare('UPDATE postulaciones SET msg_id = ?, canal_id = ? WHERE id = ?').run(msg.id, ch.id, id);
+          publicado = true;
+        } else {
+          errorPub = 'Canal de postulaciones no encontrado o sin permiso.';
+        }
+      } catch (err) {
+        console.error('[postulacion publicar]', err);
+        errorPub = err.message;
       }
     }
     await interaction.editReply({
       embeds: [embedBase({
         color: COLORES.medicina,
         titulo: 'Postulacion enviada',
-        descripcion: `Tu hoja de vida (**${id}**) fue registrada` + (publicado ? ' en el canal de la Fundacion.' : '.') + '\nEspera revision.',
+        descripcion:
+          `Tu hoja de vida (**${id}**) fue registrada` +
+          (publicado ? ' con botones de revision en el canal de la Fundacion.' : '.') +
+          (errorPub ? `\nAviso: ${errorPub}` : '') +
+          '\nEspera revision.',
         footer: 'Postulaciones',
       })],
     });
@@ -192,9 +211,6 @@ async function handle(interaction, accion, args) {
   }
 
   if (['aprobar', 'negar', 'entrevistar', 'pagina', 'cargo', 'negar_motivo'].includes(accion)) {
-    if (!puedeRevisar(interaction) && accion !== 'negar_motivo') {
-      // negar_motivo also needs check
-    }
     if (!puedeRevisar(interaction)) {
       await interaction.reply({
         content: 'Solo el **Fundador** o un **Cofundador** puede revisar postulaciones.',
@@ -266,7 +282,7 @@ async function handle(interaction, accion, args) {
       embeds: [embedBase({
         color: COLORES.medicina,
         titulo: 'Postulacion aprobada',
-        descripcion: `**${id}** · <@${row.discord_id}>\nCargo: **${cargoNombre}**\nPuedes emitir el contrato con \`/contrato\` si corresponde.`,
+        descripcion: `**${id}** · <@${row.discord_id}>\nCargo: **${cargoNombre}**`,
         footer: 'Postulaciones',
       })],
       flags: MessageFlags.Ephemeral,
@@ -313,7 +329,7 @@ async function handle(interaction, accion, args) {
       embeds: [embedBase({
         color: COLORES.denegado,
         titulo: 'Postulacion negada',
-        descripcion: `**${id}** · Motivo registrado y notificado al aspirante.`,
+        descripcion: `**${id}** · Motivo registrado.`,
         footer: 'Postulaciones',
       })],
     });
@@ -359,7 +375,7 @@ async function handle(interaction, accion, args) {
         autor_id TEXT NOT NULL, estado TEXT DEFAULT 'abierto', motivo TEXT,
         cerrado_por TEXT, creado_en TEXT DEFAULT (datetime('now')), cerrado_en TEXT
       )`);
-      getDb().prepare(`INSERT INTO tickets (id, tipo, canal_id, autor_id, estado, motivo) VALUES (?, 'entrevista', ?, ?, 'abierto', ?)`) 
+      getDb().prepare(`INSERT INTO tickets (id, tipo, canal_id, autor_id, estado, motivo) VALUES (?, 'entrevista', ?, ?, 'abierto', ?)`)
         .run(ticketId, canal.id, row.discord_id, `Postulacion ${id}`);
     } catch (e) { console.warn(e.message); }
     auditoria.registrar(interaction.user.id, 'POSTULACION.ENTREVISTA', { id, ticket: ticketId });
@@ -402,4 +418,11 @@ async function handle(interaction, accion, args) {
   await interaction.reply({ content: 'Accion no reconocida.', flags: MessageFlags.Ephemeral }).catch(() => {});
 }
 
-module.exports = { prefix, handle, CANAL_POSTULACIONES };
+module.exports = {
+  prefix,
+  handle,
+  CANAL_POSTULACIONES,
+  botonesRevision,
+  embedPostulacion,
+  asegurarTabla,
+};
