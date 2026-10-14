@@ -1,41 +1,146 @@
 const {
   SlashCommandBuilder,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
   AttachmentBuilder,
   MessageFlags,
   PermissionFlagsBits,
 } = require('discord.js');
-const { getDb, getConfig } = require('../db');
+const { getDb, getConfig, nextId } = require('../db');
 const { generarContrato } = require('../services/contrato');
 const auditoria = require('../services/auditoria');
 const { actorTexto } = require('../services/solicitudes');
+const { cargosMapeados, esAdminDiscord } = require('../services/acceso');
 const { embedBase, COLORES } = require('../utils/plantillas');
 const { sanitizar } = require('../utils/helpers');
+
+const CARGOS_EMISORES = [
+  'ST.FUNDADOR',
+  'ST.CO_CALIDAD',
+  'ST.CO_ESTRATEGIA',
+];
+
+function puedeEmitir(interaction) {
+  if (esAdminDiscord(interaction)) return true;
+  const cargos = new Set(cargosMapeados(interaction.member));
+  return CARGOS_EMISORES.some((c) => cargos.has(c));
+}
+
+function asegurarTabla() {
+  getDb().exec(`
+    CREATE TABLE IF NOT EXISTS contratos (
+      id TEXT PRIMARY KEY,
+      miembro_id TEXT NOT NULL,
+      personaje TEXT NOT NULL,
+      rango TEXT NOT NULL,
+      fecha_ingreso TEXT,
+      discord_tag TEXT,
+      canal_id TEXT,
+      msg_id TEXT,
+      emitido_por TEXT,
+      firma_fundacion_json TEXT,
+      firma_miembro_json TEXT,
+      estado TEXT DEFAULT 'Pendiente',
+      creado_en TEXT DEFAULT (datetime('now'))
+    )
+  `);
+}
+
+function botonesFirma(contratoId, firmaFund, firmaMiembro) {
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`contrato:firmar_fundacion:${contratoId}`)
+      .setLabel(firmaFund ? 'Fundacion firmada' : 'Firmar · Fundacion')
+      .setStyle(firmaFund ? ButtonStyle.Secondary : ButtonStyle.Success)
+      .setDisabled(!!firmaFund),
+    new ButtonBuilder()
+      .setCustomId(`contrato:firmar_miembro:${contratoId}`)
+      .setLabel(firmaMiembro ? 'Miembro firmado' : 'Firmar · Miembro')
+      .setStyle(firmaMiembro ? ButtonStyle.Secondary : ButtonStyle.Primary)
+      .setDisabled(!!firmaMiembro),
+  );
+  return [row];
+}
+
+function embedContrato(row, extras = {}) {
+  const ff = row.firma_fundacion_json ? JSON.parse(row.firma_fundacion_json) : null;
+  const fm = row.firma_miembro_json ? JSON.parse(row.firma_miembro_json) : null;
+  return embedBase({
+    color: row.estado === 'Completo' ? COLORES.medicina : COLORES.oro,
+    author: true,
+    titulo: `Contrato de Ingreso · ${row.id}`,
+    descripcion:
+      'Documento oficial de la Fundacion. Cada parte firma con el boton de su lado.\n' +
+      '**Izquierda:** Fundador o Cofundador · **Derecha:** el miembro contratado.',
+    campos: [
+      { name: 'Miembro', value: `<@${row.miembro_id}>`, inline: true },
+      { name: 'Personaje', value: row.personaje, inline: true },
+      { name: 'Rango / Direccion', value: row.rango, inline: true },
+      { name: 'Fecha ingreso', value: row.fecha_ingreso || '—', inline: true },
+      { name: 'Estado', value: row.estado, inline: true },
+      { name: 'Emitido por', value: row.emitido_por || '—', inline: true },
+      {
+        name: 'Firma Fundacion',
+        value: ff
+          ? `**${ff.nombre}**\n${ff.cargo || ''}\n_${ff.fecha}_`
+          : '_Pendiente · solo Fundador / Cofundador_',
+        inline: true,
+      },
+      {
+        name: 'Firma Miembro',
+        value: fm
+          ? `**${fm.nombre}**\n_${fm.fecha}_`
+          : `_Pendiente · solo <@${row.miembro_id}>_`,
+        inline: true,
+      },
+    ],
+    footer: 'Contratos',
+  });
+}
 
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('contrato')
-    .setDescription('Genera el Contrato de Ingreso Word editable · Uso: Fundador, Cofundadores, Dir. General, Admin Jefe')
+    .setDescription(
+      'Emite Contrato de Ingreso Word · Solo Fundador y Cofundadores · Firmas por boton'
+    )
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles)
     .addUserOption((o) =>
-      o.setName('miembro').setDescription('Miembro que firma el contrato').setRequired(true)
+      o.setName('miembro').setDescription('Miembro que firmara el contrato').setRequired(true)
     )
     .addStringOption((o) =>
-      o.setName('personaje').setDescription('Nombre del personaje / miembro en el documento').setRequired(true)
+      o.setName('personaje').setDescription('Nombre del personaje').setRequired(true)
     )
     .addStringOption((o) =>
-      o.setName('rango').setDescription('Rango o direccion asignada').setRequired(true)
+      o.setName('rango').setDescription('Rango o direccion').setRequired(true)
     )
     .addStringOption((o) =>
-      o.setName('fecha').setDescription('Fecha de ingreso (ej. 11/10/2026)').setRequired(false)
+      o.setName('fecha').setDescription('Fecha de ingreso').setRequired(false)
     )
     .addChannelOption((o) =>
-      o.setName('canal')
-        .setDescription('Canal de destino (por defecto canal de logs / fichas)')
-        .setRequired(false)
+      o.setName('canal').setDescription('Canal de publicacion (logs/fichas)').setRequired(false)
     ),
 
   async execute(interaction) {
+    if (!puedeEmitir(interaction)) {
+      await interaction.reply({
+        embeds: [
+          embedBase({
+            color: COLORES.denegado,
+            titulo: 'Acceso denegado',
+            descripcion:
+              'Solo el **Fundador** o los **Cofundadores** pueden emitir contratos de ingreso.',
+            footer: 'Contratos',
+          }),
+        ],
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    asegurarTabla();
 
     const user = interaction.options.getUser('miembro');
     const personaje = sanitizar(interaction.options.getString('personaje'));
@@ -44,36 +149,32 @@ module.exports = {
       interaction.options.getString('fecha') ||
       new Date().toLocaleDateString('es-PA');
     const canalOpt = interaction.options.getChannel('canal');
+    const id = nextId('CTR');
+    const emisor = actorTexto(interaction.user);
 
-    const perfil = getDb().prepare('SELECT * FROM perfiles WHERE discord_id = ?').get(user.id);
-    const discordTag = user.tag || user.username;
+    const buffer = await generarContrato({
+      miembro: personaje,
+      discord: user.tag || user.username,
+      rango,
+      fecha,
+    });
 
-    let buffer;
-    try {
-      buffer = await generarContrato({
-        miembro: personaje,
-        discord: discordTag,
+    getDb()
+      .prepare(`
+        INSERT INTO contratos (
+          id, miembro_id, personaje, rango, fecha_ingreso, discord_tag,
+          emitido_por, estado
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, 'Pendiente')
+      `)
+      .run(
+        id,
+        user.id,
+        personaje,
         rango,
         fecha,
-        fundador: 'Ing. F. Ellis',
-      });
-    } catch (err) {
-      console.error('[contrato]', err);
-      await interaction.editReply({
-        embeds: [
-          embedBase({
-            color: COLORES.denegado,
-            titulo: 'No se pudo generar el contrato',
-            descripcion: String(err.message || err).slice(0, 400),
-            footer: 'Contratos',
-          }),
-        ],
-      });
-      return;
-    }
-
-    const nombreArchivo = `Contrato_Ingreso_${personaje.replace(/\s+/g, '_')}_${user.id}.docx`;
-    const attachment = new AttachmentBuilder(buffer, { name: nombreArchivo });
+        user.tag || user.username,
+        emisor
+      );
 
     const destId =
       canalOpt?.id ||
@@ -81,64 +182,57 @@ module.exports = {
       getConfig('canal_logs') ||
       getConfig('canal_solicitudes');
 
-    let publicado = false;
+    const row = getDb().prepare('SELECT * FROM contratos WHERE id = ?').get(id);
+    const attachment = new AttachmentBuilder(buffer, {
+      name: `Contrato_${id}_${personaje.replace(/\s+/g, '_')}.docx`,
+    });
+
+    let msgId = null;
     if (destId) {
       const ch = await interaction.guild.channels.fetch(destId).catch(() => null);
-      if (ch && ch.isTextBased()) {
-        await ch.send({
-          content:
-            `**Contrato de ingreso** · <@${user.id}>\n` +
-            `Emitido por ${actorTexto(interaction.user)}`,
-          embeds: [
-            embedBase({
-              color: COLORES.oro,
-              author: true,
-              titulo: 'Contrato de Ingreso y Servicio',
-              campos: [
-                { name: 'Miembro', value: `<@${user.id}>`, inline: true },
-                { name: 'Personaje', value: personaje, inline: true },
-                { name: 'Rango / Direccion', value: rango, inline: true },
-                { name: 'Fecha', value: fecha, inline: true },
-                { name: 'Ficha', value: perfil?.numero || '—', inline: true },
-                { name: 'Emitido por', value: actorTexto(interaction.user), inline: true },
-              ],
-              descripcion:
-                'Documento Word editable (.docx). El miembro puede descargarlo, firmar y devolverlo.',
-              footer: 'Contratos',
-            }),
-          ],
+      if (ch?.isTextBased()) {
+        const msg = await ch.send({
+          content: `Contrato **${id}** · <@${user.id}> · firmas pendientes`,
+          embeds: [embedContrato(row)],
+          components: botonesFirma(id, null, null),
           files: [attachment],
         });
-        publicado = true;
+        msgId = msg.id;
+        getDb()
+          .prepare('UPDATE contratos SET canal_id = ?, msg_id = ? WHERE id = ?')
+          .run(destId, msgId, id);
       }
     }
 
     auditoria.registrar(interaction.user.id, 'CONTRATO.EMITIR', {
+      id,
       miembro: user.id,
       personaje,
       rango,
-      canal: destId || null,
     });
 
-    // Copia efimera al emisor
     await interaction.editReply({
       embeds: [
         embedBase({
           color: COLORES.oro,
           author: true,
-          titulo: 'Contrato generado',
-          descripcion: publicado
-            ? `El documento se publico en <#${destId}>. Copia adjunta para tu archivo.`
-            : 'No hay canal de logs/fichas configurado. Se adjunta aqui. Usa `/config` → Canales o el parametro `canal`.',
+          titulo: 'Contrato emitido',
+          descripcion: destId
+            ? `Publicado en <#${destId}>.\n\n**Firmar · Fundacion:** Fundador o Cofundador\n**Firmar · Miembro:** <@${user.id}>`
+            : 'Configura canal de fichas/logs o indica `canal`. Se adjunto el borrador aqui.',
           campos: [
-            { name: 'Archivo', value: nombreArchivo, inline: false },
+            { name: 'ID', value: id, inline: true },
             { name: 'Miembro', value: `<@${user.id}>`, inline: true },
-            { name: 'Rango', value: rango, inline: true },
           ],
           footer: 'Contratos',
         }),
       ],
-      files: [attachment],
+      files: destId ? undefined : [attachment],
     });
   },
 };
+
+module.exports.botonesFirma = botonesFirma;
+module.exports.embedContrato = embedContrato;
+module.exports.asegurarTabla = asegurarTabla;
+module.exports.CARGOS_EMISORES = CARGOS_EMISORES;
