@@ -68,13 +68,14 @@ async function main() {
     intents: [
       GatewayIntentBits.Guilds,
       GatewayIntentBits.GuildMembers,
+      GatewayIntentBits.GuildMessages,
+      GatewayIntentBits.MessageContent,
     ],
     partials: [Partials.Channel],
   });
 
   client.commands = new Collection();
 
-  // Cargar comandos
   const fs = require('fs');
   const path = require('path');
   const commandsPath = path.join(__dirname, 'commands');
@@ -95,12 +96,13 @@ async function main() {
   const { cargarHandlers, manejarInteraccion } = require('./handlers/interacciones');
   cargarHandlers();
 
+  const { manejarPrefijo } = require('./handlers/prefix');
+
   client.once(Events.ClientReady, async (c) => {
     botStatus = 'online';
     botReadyAt = new Date().toISOString();
     console.log('[AEGIS] Listo como', c.user.tag);
 
-    // Registrar slash commands
     try {
       const rest = new REST({ version: '10' }).setToken(token);
       const body = [...client.commands.values()].map((cmd) => cmd.data.toJSON());
@@ -118,7 +120,6 @@ async function main() {
     }
   });
 
-  // Fase 5: cuarentena al entrar (Visitante)
   client.on(Events.GuildMemberAdd, async (member) => {
     try {
       const { aplicarCuarentena } = require('./services/roles');
@@ -127,6 +128,23 @@ async function main() {
     } catch (err) {
       console.error('[AEGIS] GuildMemberAdd', err);
     }
+
+    try {
+      const { embedMiembroNuevo, CANAL_BIENVENIDA } = require('./services/bienvenida');
+      const ch = await member.guild.channels.fetch(CANAL_BIENVENIDA).catch(() => null);
+      if (ch?.isTextBased()) {
+        await ch.send({
+          content: `${member}`,
+          embeds: [embedMiembroNuevo(member, client)],
+        }).catch(() => {});
+      }
+    } catch (err) {
+      console.error('[AEGIS] Bienvenida miembro', err.message);
+    }
+  });
+
+  client.on(Events.MessageCreate, (message) => {
+    manejarPrefijo(message).catch((err) => console.error('[prefix]', err));
   });
 
   client.on(Events.InteractionCreate, (interaction) => {
