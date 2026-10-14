@@ -1,6 +1,6 @@
 /**
- * Genera Contrato de Ingreso F.A.M. en .docx editable.
- * Soporta firmas digitales de Fundacion y Miembro.
+ * Genera Contrato de Ingreso F.A.M. en .docx.
+ * Las firmas (texto o imagen) se colocan solo en el Word.
  */
 
 const {
@@ -18,6 +18,7 @@ const {
   Header,
   Footer,
   PageNumber,
+  ImageRun,
 } = require('docx');
 
 const BORDER = { style: BorderStyle.SINGLE, size: 4, color: '1A1A2E' };
@@ -102,33 +103,75 @@ function linea() {
   });
 }
 
-function bloqueFirma({ titulo, nombre, cargo, firmado, fechaFirma }) {
+async function descargarImagen(url) {
+  if (!url) return null;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const buf = Buffer.from(await res.arrayBuffer());
+    const ct = (res.headers.get('content-type') || '').toLowerCase();
+    let type = 'png';
+    if (ct.includes('jpeg') || ct.includes('jpg') || /\.jpe?g(\?|$)/i.test(url)) type = 'jpg';
+    else if (ct.includes('gif') || /\.gif(\?|$)/i.test(url)) type = 'gif';
+    else if (ct.includes('bmp')) type = 'bmp';
+    return { buffer: buf, type };
+  } catch (err) {
+    console.error('[contrato imagen]', err.message);
+    return null;
+  }
+}
+
+/**
+ * Celda de firma: imagen embebida o texto manuscrito; linea en blanco si no hay firma.
+ */
+async function bloqueFirma(firma, defaults) {
   const lineas = [];
-  if (firmado) {
+
+  if (firma && firma.tipo === 'imagen' && firma.imagenUrl) {
+    const img = await descargarImagen(firma.imagenUrl);
+    if (img) {
+      lineas.push(
+        new Paragraph({
+          alignment: AlignmentType.CENTER,
+          children: [
+            new ImageRun({
+              type: img.type,
+              data: img.buffer,
+              transformation: { width: 160, height: 60 },
+              altText: { title: 'Firma', description: 'Firma digitalizada', name: 'firma' },
+            }),
+          ],
+        })
+      );
+    } else if (firma.texto) {
+      lineas.push(
+        new Paragraph({
+          alignment: AlignmentType.CENTER,
+          children: [
+            new TextRun({
+              text: firma.texto,
+              bold: true,
+              italics: true,
+              size: 28,
+              font: 'Times New Roman',
+              color: '1A1A2E',
+            }),
+          ],
+        })
+      );
+    }
+  } else if (firma && (firma.texto || firma.nombre)) {
     lineas.push(
       new Paragraph({
         alignment: AlignmentType.CENTER,
         children: [
           new TextRun({
-            text: nombre || '—',
+            text: firma.texto || firma.nombre,
             bold: true,
             italics: true,
-            size: 22,
-            font: 'Brush Script MT',
-            color: '1A1A2E',
-          }),
-        ],
-      })
-    );
-    lineas.push(
-      new Paragraph({
-        alignment: AlignmentType.CENTER,
-        children: [
-          new TextRun({
-            text: `Firmado digitalmente · ${fechaFirma || ''}`,
-            size: 14,
+            size: 28,
             font: 'Times New Roman',
-            color: '1D9E75',
+            color: '1A1A2E',
           }),
         ],
       })
@@ -147,12 +190,29 @@ function bloqueFirma({ titulo, nombre, cargo, firmado, fechaFirma }) {
       })
     );
   }
+
+  if (firma && firma.fecha) {
+    lineas.push(
+      new Paragraph({
+        alignment: AlignmentType.CENTER,
+        children: [
+          new TextRun({
+            text: `Firmado · ${firma.fecha}`,
+            size: 14,
+            font: 'Times New Roman',
+            color: '1D9E75',
+          }),
+        ],
+      })
+    );
+  }
+
   lineas.push(
     new Paragraph({
       alignment: AlignmentType.CENTER,
       children: [
         new TextRun({
-          text: titulo,
+          text: defaults.titulo,
           bold: true,
           size: 18,
           font: 'Times New Roman',
@@ -160,13 +220,14 @@ function bloqueFirma({ titulo, nombre, cargo, firmado, fechaFirma }) {
       ],
     })
   );
-  if (cargo) {
+
+  if (defaults.cargo || firma?.cargo) {
     lineas.push(
       new Paragraph({
         alignment: AlignmentType.CENTER,
         children: [
           new TextRun({
-            text: cargo,
+            text: firma?.cargo || defaults.cargo || '',
             size: 16,
             font: 'Times New Roman',
             color: '6B6B6B',
@@ -175,6 +236,7 @@ function bloqueFirma({ titulo, nombre, cargo, firmado, fechaFirma }) {
       })
     );
   }
+
   return new TableCell({
     width: { size: 4680, type: WidthType.DXA },
     borders: SIN_BORDES,
@@ -184,6 +246,8 @@ function bloqueFirma({ titulo, nombre, cargo, firmado, fechaFirma }) {
 
 /**
  * @param {object} datos
+ * @param {object|null} datos.firmaFundacion { tipo, texto, imagenUrl, cargo, fecha }
+ * @param {object|null} datos.firmaMiembro
  */
 async function generarContrato(datos) {
   const miembro = datos.miembro || '________________';
@@ -193,6 +257,15 @@ async function generarContrato(datos) {
 
   const firmaFundacion = datos.firmaFundacion || null;
   const firmaMiembro = datos.firmaMiembro || null;
+
+  const celdaFund = await bloqueFirma(firmaFundacion, {
+    titulo: 'Representante de F.A.M.',
+    cargo: 'Fundador / Cofundador',
+  });
+  const celdaMiem = await bloqueFirma(firmaMiembro, {
+    titulo: 'Firma del Miembro',
+    cargo: `[${miembro} · ${rango}]`,
+  });
 
   const doc = new Document({
     sections: [
@@ -392,28 +465,7 @@ async function generarContrato(datos) {
           new Table({
             width: { size: 9360, type: WidthType.DXA },
             columnWidths: [4680, 4680],
-            rows: [
-              new TableRow({
-                children: [
-                  bloqueFirma({
-                    titulo: firmaFundacion?.nombre || 'Representante de F.A.M.',
-                    nombre: firmaFundacion?.nombre,
-                    cargo: firmaFundacion?.cargo || 'Fundador / Cofundador',
-                    firmado: !!firmaFundacion,
-                    fechaFirma: firmaFundacion?.fecha,
-                  }),
-                  bloqueFirma({
-                    titulo: 'Firma del Miembro',
-                    nombre: firmaMiembro?.nombre || miembro,
-                    cargo: firmaMiembro
-                      ? `[${miembro} · ${rango}]`
-                      : `[${miembro} · ${rango}]`,
-                    firmado: !!firmaMiembro,
-                    fechaFirma: firmaMiembro?.fecha,
-                  }),
-                ],
-              }),
-            ],
+            rows: [new TableRow({ children: [celdaFund, celdaMiem] })],
           }),
         ],
       },
