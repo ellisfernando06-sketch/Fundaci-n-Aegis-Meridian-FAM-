@@ -5,10 +5,10 @@
  *
  * Orden visual:
  *   FUNDACION → (solo fundadores)
- *   DIRECCIONES → directores de F.A.M, gerentes
  *   MODERACION → admin jefe, senior, en prueba
  *   SOPORTE → soporte tecnico
  *   CUPULA → consejo
+ *   DIRECCIONES → directores de F.A.M, gerentes
  *   SI / SEG / MED / INV / INT / CD / CAOS / PERMISOS / LLAVES
  *   En facciones: mandan jefes y subcomandantes (sin subdirectores ni subgerentes)
  */
@@ -18,10 +18,10 @@ const FORMATO_EMOJI = (emoji, prefijo, nombre) => `${emoji} ${prefijo} ●┇${n
 
 const SEPARADORES = [
   { key: 'SEP.FUNDACION', nombreRol: '━━━━━━━━『  FUNDACIÓN  』━━━━━━━━', orden: 10, color: '#1a1a1e' },
-  { key: 'SEP.DIRECCIONES', nombreRol: '━━━━━━━━『  DIRECCIONES  』━━━━━━━━', orden: 20, color: '#1a1a1e' },
-  { key: 'SEP.MODERACION', nombreRol: '━━━━━━━━『  MODERACIÓN  』━━━━━━━━', orden: 40, color: '#1a1a1e' },
-  { key: 'SEP.SOPORTE', nombreRol: '━━━━━━━━『  SOPORTE  』━━━━━━━━', orden: 50, color: '#1a1a1e' },
-  { key: 'SEP.CUPULA', nombreRol: '━━━━━━━━『  CÚPULA  』━━━━━━━━', orden: 60, color: '#1a1a1e' },
+  { key: 'SEP.MODERACION', nombreRol: '━━━━━━━━『  MODERACIÓN  』━━━━━━━━', orden: 20, color: '#1a1a1e' },
+  { key: 'SEP.SOPORTE', nombreRol: '━━━━━━━━『  SOPORTE  』━━━━━━━━', orden: 30, color: '#1a1a1e' },
+  { key: 'SEP.CUPULA', nombreRol: '━━━━━━━━『  CÚPULA  』━━━━━━━━', orden: 40, color: '#1a1a1e' },
+  { key: 'SEP.DIRECCIONES', nombreRol: '━━━━━━━━『  DIRECCIONES  』━━━━━━━━', orden: 50, color: '#1a1a1e' },
   { key: 'SEP.SI', nombreRol: '━━━━━━━━『  SEGURIDAD INTERNA  』━━━━━━━━', orden: 80, color: '#1a1a1e' },
   { key: 'SEP.SEG', nombreRol: '━━━━━━━━『  FACCIÓN SEGURIDAD  』━━━━━━━━', orden: 120, color: '#1a1a1e' },
   { key: 'SEP.MED', nombreRol: '━━━━━━━━『  MEDICINA  』━━━━━━━━', orden: 180, color: '#1a1a1e' },
@@ -80,90 +80,6 @@ const ORGANIGRAMA = {
     ],
   },
 
-  direcciones: {
-    prefijo: 'DIR',
-    color: '#5865F2',
-    nombre: 'Direcciones',
-    cargos: [
-      {
-        key: 'SI.GERENTE',
-        nombre: 'Gerente de Seguridad Interna',
-        orden: 21,
-        nivelMando: 2,
-        aliases: [
-          'gerente de seguridad interna',
-          'gerente se seguridad interna',
-          'gerente si',
-          'gerente de si',
-        ],
-      },
-      {
-        key: 'DIR.GENERAL',
-        nombre: 'Director General de F.A.M',
-        orden: 22,
-        nivelMando: 1,
-        aliases: [
-          'director general de f.a.m',
-          'director general de fam',
-          'director general',
-          'dir general',
-          'dg',
-        ],
-      },
-      {
-        key: 'INT.GERENTE',
-        nombre: 'Gerente de Inteligencia',
-        orden: 23,
-        nivelMando: 2,
-        aliases: ['gerente de inteligencia', 'gerente inteligencia'],
-      },
-      {
-        key: 'SEG.COMANDANTE',
-        nombre: 'Director de Operaciones de Seguridad de F.A.M',
-        orden: 24,
-        nivelMando: 2,
-        aliases: [
-          'director de operaciones de seguridad de f.a.m',
-          'director de operaciones de seguridad de fam',
-          'director de operaciones de seguridad',
-          'director de operaciones',
-          'comandante de seguridad',
-          'comandante seguridad',
-        ],
-      },
-      {
-        key: 'MED.DIRECTOR',
-        nombre: 'Director Medico de F.A.M',
-        orden: 25,
-        nivelMando: 2,
-        aliases: [
-          'director medico de f.a.m',
-          'director medico de fam',
-          'director médico de f.a.m',
-          'director medico',
-          'director médico',
-          'dir medico',
-          'director de medicina',
-        ],
-      },
-      {
-        key: 'INV.DIRECTOR',
-        nombre: 'Director de Investigacion Cientifica de F.A.M',
-        orden: 26,
-        nivelMando: 2,
-        aliases: [
-          'director de investigacion cientifica de f.a.m',
-          'director de investigacion cientifica de fam',
-          'director de investigación científica de f.a.m',
-          'director de investigacion cientifica',
-          'director de investigación científica',
-          'director de investigacion',
-          'director investigacion',
-        ],
-      },
-    ],
-  },
-
   moderacion: {
     prefijo: 'MOD',
     color: '#E67E22',
@@ -172,21 +88,21 @@ const ORGANIGRAMA = {
       {
         key: 'ST.ADMIN_JEFE',
         nombre: 'Administrador en Jefe',
-        orden: 41,
+        orden: 21,
         nivelMando: 1,
         aliases: ['administrador en jefe', 'admin en jefe', 'admin jefe', 'administrador jefe'],
       },
       {
         key: 'ST.ADMIN_SENIOR',
         nombre: 'Administrador Senior',
-        orden: 42,
+        orden: 22,
         nivelMando: 1,
         aliases: ['administrador senior', 'admin senior', 'admin sr'],
       },
       {
         key: 'ST.ADMIN_PRUEBA',
         nombre: 'Administrador en Prueba',
-        orden: 43,
+        orden: 23,
         nivelMando: 1,
         aliases: ['administrador en prueba', 'admin en prueba', 'admin prueba'],
       },
@@ -201,14 +117,14 @@ const ORGANIGRAMA = {
       {
         key: 'SP.TECNICO',
         nombre: 'Soporte Tecnico',
-        orden: 51,
+        orden: 31,
         nivelMando: 1,
         aliases: ['soporte tecnico', 'soporte técnico', 'soporte', 'tech support'],
       },
       {
         key: 'SP.TECNICO_PRUEBA',
         nombre: 'Soporte Tecnico en Prueba',
-        orden: 52,
+        orden: 32,
         nivelMando: 1,
         aliases: ['soporte tecnico en prueba', 'soporte técnico en prueba', 'soporte en prueba'],
       },
@@ -223,16 +139,100 @@ const ORGANIGRAMA = {
       {
         key: 'CUP.PRESIDENTE',
         nombre: 'Presidente del Consejo',
-        orden: 61,
+        orden: 41,
         nivelMando: 1,
         aliases: ['presidente del consejo', 'presidente'],
       },
       {
         key: 'CUP.CONSEJO',
         nombre: 'Consejo Directivo',
-        orden: 62,
+        orden: 42,
         nivelMando: 1,
         aliases: ['consejo directivo', 'junta de directores', 'consejo'],
+      },
+    ],
+  },
+
+  direcciones: {
+    prefijo: 'DIR',
+    color: '#5865F2',
+    nombre: 'Direcciones',
+    cargos: [
+      {
+        key: 'SI.GERENTE',
+        nombre: 'Gerente de Seguridad Interna',
+        orden: 51,
+        nivelMando: 2,
+        aliases: [
+          'gerente de seguridad interna',
+          'gerente se seguridad interna',
+          'gerente si',
+          'gerente de si',
+        ],
+      },
+      {
+        key: 'DIR.GENERAL',
+        nombre: 'Director General de F.A.M',
+        orden: 52,
+        nivelMando: 1,
+        aliases: [
+          'director general de f.a.m',
+          'director general de fam',
+          'director general',
+          'dir general',
+          'dg',
+        ],
+      },
+      {
+        key: 'INT.GERENTE',
+        nombre: 'Gerente de Inteligencia',
+        orden: 53,
+        nivelMando: 2,
+        aliases: ['gerente de inteligencia', 'gerente inteligencia'],
+      },
+      {
+        key: 'SEG.COMANDANTE',
+        nombre: 'Director de Operaciones de Seguridad de F.A.M',
+        orden: 54,
+        nivelMando: 2,
+        aliases: [
+          'director de operaciones de seguridad de f.a.m',
+          'director de operaciones de seguridad de fam',
+          'director de operaciones de seguridad',
+          'director de operaciones',
+          'comandante de seguridad',
+          'comandante seguridad',
+        ],
+      },
+      {
+        key: 'MED.DIRECTOR',
+        nombre: 'Director Medico de F.A.M',
+        orden: 55,
+        nivelMando: 2,
+        aliases: [
+          'director medico de f.a.m',
+          'director medico de fam',
+          'director médico de f.a.m',
+          'director medico',
+          'director médico',
+          'dir medico',
+          'director de medicina',
+        ],
+      },
+      {
+        key: 'INV.DIRECTOR',
+        nombre: 'Director de Investigacion Cientifica de F.A.M',
+        orden: 56,
+        nivelMando: 2,
+        aliases: [
+          'director de investigacion cientifica de f.a.m',
+          'director de investigacion cientifica de fam',
+          'director de investigación científica de f.a.m',
+          'director de investigacion cientifica',
+          'director de investigación científica',
+          'director de investigacion',
+          'director investigacion',
+        ],
       },
     ],
   },
