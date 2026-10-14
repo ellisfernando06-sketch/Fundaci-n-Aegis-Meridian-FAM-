@@ -13,6 +13,9 @@ const REQUISITOS = {
   ayuda: { allowPublic: true },
   organigrama: { allowPublic: true },
   llaves: { allowPublic: true },
+  postulacion: { allowPublic: true },
+  tickets: { allowPublic: true },
+  tienda: { allowPublic: true },
 
   config: { soloAdmin: true },
   config_roles: { soloAdmin: true },
@@ -38,7 +41,12 @@ const REQUISITOS = {
   contrato: {
     nivelMin: 1,
     keys: ['KEY-CUP-01', 'KEY-CUP-02'],
-    cargos: ['ST.FUNDADOR', 'ST.CO_CALIDAD', 'ST.CO_ESTRATEGIA', 'DIR.GENERAL', 'ST.ADMIN_JEFE'],
+    cargos: ['ST.FUNDADOR', 'ST.CO_CALIDAD', 'ST.CO_ESTRATEGIA'],
+  },
+  contratos: {
+    nivelMin: 1,
+    keys: ['KEY-CUP-01', 'KEY-CUP-02'],
+    cargos: ['ST.FUNDADOR', 'ST.CO_CALIDAD', 'ST.CO_ESTRATEGIA', 'DIR.GENERAL'],
   },
 
   anomalia: {
@@ -82,8 +90,6 @@ const REQUISITOS = {
     ],
   },
 
-  tickets: { allowPublic: true },
-  tienda: { allowPublic: true },
   finanzas: {
     nivelMin: 1,
     keys: ['KEY-CUP-01'],
