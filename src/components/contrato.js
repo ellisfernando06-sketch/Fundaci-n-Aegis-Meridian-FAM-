@@ -5,9 +5,11 @@ const {
   ModalBuilder,
   TextInputBuilder,
   TextInputStyle,
+  AttachmentBuilder,
   MessageFlags,
 } = require('discord.js');
 const { getDb } = require('../db');
+const { generarContrato } = require('../services/contrato');
 const auditoria = require('../services/auditoria');
 const { cargosMapeados, esAdminDiscord } = require('../services/acceso');
 const { embedBase, COLORES } = require('../utils/plantillas');
@@ -23,7 +25,6 @@ const CARGO_NOMBRE = {
   'ST.CO_ESTRATEGIA': 'Cofundador de Estrategia y Estatuto',
 };
 
-/** pendientes de subida de imagen: discordId -> { lado, contratoId, expira } */
 const pendientesImagen = new Map();
 
 function asegurarTablas() {
@@ -54,13 +55,8 @@ function asegurarTablas() {
       creado_en TEXT DEFAULT (datetime('now'))
     );
   `);
-  // migracion suave si faltan columnas
-  try {
-    db.exec(`ALTER TABLE firmas_digitales ADD COLUMN imagen_url TEXT`);
-  } catch (_) {}
-  try {
-    db.exec(`ALTER TABLE firmas_digitales ADD COLUMN tipo_preferido TEXT DEFAULT 'texto'`);
-  } catch (_) {}
+  try { db.exec(`ALTER TABLE firmas_digitales ADD COLUMN imagen_url TEXT`); } catch (_) {}
+  try { db.exec(`ALTER TABLE firmas_digitales ADD COLUMN tipo_preferido TEXT DEFAULT 'texto'`); } catch (_) {}
 }
 
 function puedeFirmarFundacion(interaction) {
@@ -100,7 +96,6 @@ function botonesFirma(contratoId, firmaFund, firmaMiembro) {
 }
 
 function botonesElegirFirma(retorno) {
-  // retorno = fundacion:CTR-xxx | miembro:CTR-xxx | gestionar
   return [
     new ActionRowBuilder().addComponents(
       new ButtonBuilder()
@@ -115,32 +110,18 @@ function botonesElegirFirma(retorno) {
   ];
 }
 
+/** Embed solo estado; las firmas van en el Word */
 function embedContrato(row) {
   const ff = row.firma_fundacion_json ? JSON.parse(row.firma_fundacion_json) : null;
   const fm = row.firma_miembro_json ? JSON.parse(row.firma_miembro_json) : null;
 
-  function bloqueFirma(f, pendiente) {
-    if (!f) return pendiente;
-    const lineas = [];
-    if (f.tipo === 'imagen' && f.imagenUrl) {
-      lineas.push('🖼️ Firma por imagen');
-      lineas.push(`[Ver imagen](${f.imagenUrl})`);
-    } else {
-      lineas.push(`✍️ **${f.texto || f.nombre || '—'}**`);
-    }
-    if (f.cargo) lineas.push(f.cargo);
-    if (f.fecha) lineas.push(`_${f.fecha}_`);
-    if (f.discordId) lineas.push(`<@${f.discordId}>`);
-    return lineas.join('\n');
-  }
-
-  const embed = embedBase({
+  return embedBase({
     color: row.estado === 'Completo' ? COLORES.medicina : COLORES.oro,
     author: true,
     titulo: `Contrato de Ingreso · ${row.id}`,
     descripcion:
-      'Documento Word adjunto (no se modifica).\n' +
-      'Firmas digitales por boton. Puedes usar **texto** o **imagen** de tu firma.',
+      'Las firmas se colocan **solo en el documento Word** adjunto.\n' +
+      'Al firmar, el archivo se regenera con tu firma en el lado correspondiente.',
     campos: [
       { name: 'Miembro', value: `<@${row.miembro_id}>`, inline: true },
       { name: 'Personaje', value: row.personaje, inline: true },
@@ -149,24 +130,35 @@ function embedContrato(row) {
       { name: 'Estado', value: row.estado, inline: true },
       { name: 'Emitido por', value: row.emitido_por || '—', inline: true },
       {
-        name: 'Firma · Fundacion',
-        value: bloqueFirma(ff, '_Pendiente · Fundador / Cofundador_'),
+        name: 'Lado Fundacion',
+        value: ff ? `Firmado · <@${ff.discordId}> · _${ff.fecha}_` : '_Pendiente_',
         inline: true,
       },
       {
-        name: 'Firma · Miembro',
-        value: bloqueFirma(fm, `_Pendiente · <@${row.miembro_id}>_`),
+        name: 'Lado Miembro',
+        value: fm ? `Firmado · <@${fm.discordId}> · _${fm.fecha}_` : `_Pendiente · <@${row.miembro_id}>_`,
         inline: true,
       },
     ],
     footer: 'Contratos',
   });
+}
 
-  // Miniatura de la ultima firma por imagen (prioridad miembro, luego fundacion)
-  const img = (fm && fm.tipo === 'imagen' && fm.imagenUrl) || (ff && ff.tipo === 'imagen' && ff.imagenUrl);
-  if (img) embed.setThumbnail(img);
+async function regenerarWord(row) {
+  const ff = row.firma_fundacion_json ? JSON.parse(row.firma_fundacion_json) : null;
+  const fm = row.firma_miembro_json ? JSON.parse(row.firma_miembro_json) : null;
 
-  return embed;
+  const buffer = await generarContrato({
+    miembro: row.personaje,
+    discord: row.discord_tag,
+    rango: row.rango,
+    fecha: row.fecha_ingreso,
+    firmaFundacion: ff,
+    firmaMiembro: fm,
+  });
+
+  const nombre = `Contrato_${row.id}_${String(row.personaje).replace(/\s+/g, '_')}.docx`;
+  return new AttachmentBuilder(buffer, { name: nombre });
 }
 
 async function actualizarMensajeContrato(interaction, row) {
@@ -178,12 +170,20 @@ async function actualizarMensajeContrato(interaction, row) {
     row.estado = 'Completo';
   }
 
+  let files = [];
+  try {
+    files = [await regenerarWord(row)];
+  } catch (err) {
+    console.error('[contrato regenerar]', err);
+  }
+
   const payload = {
     content: completo
-      ? `Contrato **${row.id}** · <@${row.miembro_id}> · **firmado por ambas partes**`
+      ? `Contrato **${row.id}** · <@${row.miembro_id}> · **firmado por ambas partes** (ver Word adjunto)`
       : `Contrato **${row.id}** · <@${row.miembro_id}> · firmas pendientes`,
     embeds: [embedContrato(row)],
     components: botonesFirma(row.id, ff, fm),
+    files,
   };
 
   if (interaction.message) {
@@ -197,7 +197,6 @@ async function actualizarMensajeContrato(interaction, row) {
   }
 }
 
-/** Menu: elegir tipo de firma o crear si no tiene */
 async function menuFirma(interaction, retorno) {
   const firma = obtenerFirma(interaction.user.id);
   const tieneTexto = !!(firma && firma.texto);
@@ -210,9 +209,8 @@ async function menuFirma(interaction, retorno) {
           color: COLORES.oro,
           titulo: 'No tienes firma digital',
           descripcion:
-            'Elige como quieres registrar tu firma:\n' +
-            '· **Firma de texto** — escribes tu nombre o rubrica\n' +
-            '· **Subir imagen** — adjunta una imagen de tu firma digitalizada',
+            'Elige como registrar tu firma (se colocara en el Word):\n' +
+            '· **Firma de texto**\n· **Subir imagen** de tu firma digitalizada',
           footer: 'Contratos',
         }),
       ],
@@ -222,7 +220,6 @@ async function menuFirma(interaction, retorno) {
     return;
   }
 
-  // Tiene al menos una: ofrecer usar existente o actualizar
   const rows = [
     new ActionRowBuilder().addComponents(
       ...(tieneTexto
@@ -262,7 +259,7 @@ async function menuFirma(interaction, retorno) {
         descripcion:
           (tieneTexto ? `Texto: **${firma.texto}**\n` : '') +
           (tieneImg ? `Imagen: [ver](${firma.imagen_url})\n` : '') +
-          '\nElige cual usar en este contrato o actualiza tu firma.',
+          '\nSe insertara **solo en el Word** del contrato.',
         footer: 'Contratos',
         thumbnail: tieneImg ? firma.imagen_url : null,
       }),
@@ -293,6 +290,10 @@ async function aplicarFirmaGuardada(interaction, row, lado, tipo) {
       flags: MessageFlags.Ephemeral,
     });
     return;
+  }
+
+  if (!interaction.deferred && !interaction.replied) {
+    await interaction.deferUpdate().catch(() => {});
   }
 
   const fecha = new Date().toLocaleString('es-PA');
@@ -326,41 +327,22 @@ async function aplicarFirmaGuardada(interaction, row, lado, tipo) {
   );
 
   const actualizado = getDb().prepare('SELECT * FROM contratos WHERE id = ?').get(row.id);
+  await actualizarMensajeContrato(interaction, actualizado);
 
-  if (interaction.deferred || interaction.replied) {
-    await actualizarMensajeContrato(interaction, actualizado);
-    await interaction
-      .followUp({
-        embeds: [
-          embedBase({
-            color: COLORES.medicina,
-            titulo: 'Firma aplicada',
-            descripcion: `Se registro tu firma (**${payloadFirma.tipo}**) en el lado **${lado}** del contrato **${row.id}**.`,
-            footer: 'Contratos',
-            thumbnail: payloadFirma.imagenUrl || null,
-          }),
-        ],
-        flags: MessageFlags.Ephemeral,
-      })
-      .catch(() => {});
-  } else {
-    await interaction.deferUpdate().catch(() => {});
-    await actualizarMensajeContrato(interaction, actualizado);
-    await interaction
-      .followUp({
-        embeds: [
-          embedBase({
-            color: COLORES.medicina,
-            titulo: 'Firma aplicada',
-            descripcion: `Se registro tu firma (**${payloadFirma.tipo}**) en el lado **${lado}** del contrato **${row.id}**.`,
-            footer: 'Contratos',
-            thumbnail: payloadFirma.imagenUrl || null,
-          }),
-        ],
-        flags: MessageFlags.Ephemeral,
-      })
-      .catch(() => {});
-  }
+  await interaction
+    .followUp({
+      embeds: [
+        embedBase({
+          color: COLORES.medicina,
+          titulo: 'Firma colocada en el Word',
+          descripcion:
+            `Tu firma (**${payloadFirma.tipo}**) se inserto en el lado **${lado === 'fundacion' ? 'Fundacion (izquierda)' : 'Miembro (derecha)'}** del documento **${row.id}**.\nDescarga de nuevo el archivo adjunto al mensaje del contrato.`,
+          footer: 'Contratos',
+        }),
+      ],
+      flags: MessageFlags.Ephemeral,
+    })
+    .catch(() => {});
 }
 
 async function iniciarSubidaImagen(interaction, retorno) {
@@ -377,7 +359,7 @@ async function iniciarSubidaImagen(interaction, retorno) {
         titulo: 'Subir imagen de firma',
         descripcion:
           'Envia **en este canal** una imagen (PNG/JPG/WebP) de tu firma en los proximos **90 segundos**.\n' +
-          'Solo se aceptara el mensaje tuyo con un archivo de imagen.',
+          'Se insertara en el Word al confirmar la firma.',
         footer: 'Contratos',
       }),
     ],
@@ -387,7 +369,11 @@ async function iniciarSubidaImagen(interaction, retorno) {
   const filter = (m) =>
     m.author.id === interaction.user.id &&
     m.attachments.size > 0 &&
-    m.attachments.some((a) => (a.contentType || '').startsWith('image/') || /\.(png|jpe?g|webp|gif)$/i.test(a.name || ''));
+    m.attachments.some(
+      (a) =>
+        (a.contentType || '').startsWith('image/') ||
+        /\.(png|jpe?g|webp|gif)$/i.test(a.name || '')
+    );
 
   const collector = interaction.channel.createMessageCollector({
     filter,
@@ -414,18 +400,16 @@ async function iniciarSubidaImagen(interaction, retorno) {
       .run(interaction.user.id, url);
 
     pendientesImagen.delete(interaction.user.id);
-    auditoria.registrar(interaction.user.id, 'FIRMA.IMAGEN', { url: url.slice(0, 80) });
-
+    auditoria.registrar(interaction.user.id, 'FIRMA.IMAGEN', {});
     await msg.react('✅').catch(() => {});
 
     const [lado, contratoId] = String(retorno).split(':');
     if ((lado === 'fundacion' || lado === 'miembro') && contratoId) {
       const row = getDb().prepare('SELECT * FROM contratos WHERE id = ?').get(contratoId);
       if (row) {
-        // validar permiso
         if (lado === 'fundacion' && !puedeFirmarFundacion(interaction)) {
           await interaction.followUp({
-            content: 'Imagen guardada. No tienes permiso para firmar por la Fundacion.',
+            content: 'Imagen guardada. Sin permiso para firmar Fundacion.',
             flags: MessageFlags.Ephemeral,
           });
           return;
@@ -447,7 +431,7 @@ async function iniciarSubidaImagen(interaction, retorno) {
         embedBase({
           color: COLORES.medicina,
           titulo: 'Imagen de firma guardada',
-          descripcion: 'Tu firma por imagen quedo registrada. Al firmar un contrato podras usarla.',
+          descripcion: 'Quedo registrada. Al firmar un contrato se insertara en el Word.',
           footer: 'Contratos',
           thumbnail: url,
         }),
@@ -461,7 +445,7 @@ async function iniciarSubidaImagen(interaction, retorno) {
       pendientesImagen.delete(interaction.user.id);
       await interaction
         .followUp({
-          content: 'Tiempo agotado. No se recibio ninguna imagen de firma.',
+          content: 'Tiempo agotado. No se recibio imagen.',
           flags: MessageFlags.Ephemeral,
         })
         .catch(() => {});
@@ -484,7 +468,9 @@ async function pedirModalTexto(interaction, retorno) {
         .setRequired(true)
         .setMaxLength(60)
         .setPlaceholder('Ej. F. Ellis')
-        .setValue((firma?.texto || interaction.user.globalName || interaction.user.username || '').slice(0, 60)),
+        .setValue(
+          (firma?.texto || interaction.user.globalName || interaction.user.username || '').slice(0, 60)
+        ),
     ),
   );
 
@@ -495,7 +481,6 @@ async function handle(interaction, accion, args) {
   asegurarTablas();
   const retorno = args[0] || 'gestionar';
 
-  // --- Crear / guardar texto ---
   if (accion === 'guardar_texto') {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const texto = sanitizar(interaction.fields.getTextInputValue('texto')).slice(0, 60);
@@ -521,14 +506,13 @@ async function handle(interaction, accion, args) {
       const row = getDb().prepare('SELECT * FROM contratos WHERE id = ?').get(contratoId);
       if (row) {
         if (lado === 'fundacion' && !puedeFirmarFundacion(interaction)) {
-          await interaction.editReply({ content: `Firma **${texto}** guardada. Sin permiso para firmar Fundacion.` });
+          await interaction.editReply({ content: `Firma **${texto}** guardada. Sin permiso Fundacion.` });
           return;
         }
         if (lado === 'miembro' && interaction.user.id !== row.miembro_id && !esAdminDiscord(interaction)) {
           await interaction.editReply({ content: `Firma **${texto}** guardada.` });
           return;
         }
-        // aplicar
         const fecha = new Date().toLocaleString('es-PA');
         const payloadFirma = {
           tipo: 'texto',
@@ -551,8 +535,8 @@ async function handle(interaction, accion, args) {
           embeds: [
             embedBase({
               color: COLORES.medicina,
-              titulo: 'Firma de texto aplicada',
-              descripcion: `**${texto}** registrada en el lado **${lado}** del contrato **${contratoId}**.`,
+              titulo: 'Firma colocada en el Word',
+              descripcion: `**${texto}** insertada en el lado **${lado}** del documento **${contratoId}**. Descarga el Word adjunto actualizado.`,
               footer: 'Contratos',
             }),
           ],
@@ -566,7 +550,7 @@ async function handle(interaction, accion, args) {
         embedBase({
           color: COLORES.medicina,
           titulo: 'Firma de texto guardada',
-          descripcion: `Tu firma **${texto}** quedo registrada.`,
+          descripcion: `**${texto}** registrada. Se usara al firmar contratos (solo en el Word).`,
           footer: 'Contratos',
         }),
       ],
@@ -574,18 +558,13 @@ async function handle(interaction, accion, args) {
     return;
   }
 
-  if (accion === 'firma_texto') {
-    return pedirModalTexto(interaction, retorno);
-  }
-
-  if (accion === 'firma_imagen') {
-    return iniciarSubidaImagen(interaction, retorno);
-  }
+  if (accion === 'firma_texto') return pedirModalTexto(interaction, retorno);
+  if (accion === 'firma_imagen') return iniciarSubidaImagen(interaction, retorno);
 
   if (accion === 'usar_texto' || accion === 'usar_imagen') {
     const [lado, contratoId] = String(retorno).split(':');
     if (!contratoId || (lado !== 'fundacion' && lado !== 'miembro')) {
-      await interaction.reply({ content: 'Contexto de contrato invalido.', flags: MessageFlags.Ephemeral });
+      await interaction.reply({ content: 'Contexto invalido.', flags: MessageFlags.Ephemeral });
       return;
     }
     const row = getDb().prepare('SELECT * FROM contratos WHERE id = ?').get(contratoId);
@@ -594,17 +573,16 @@ async function handle(interaction, accion, args) {
       return;
     }
     if (lado === 'fundacion' && !puedeFirmarFundacion(interaction)) {
-      await interaction.reply({ content: 'Sin permiso para firmar por la Fundacion.', flags: MessageFlags.Ephemeral });
+      await interaction.reply({ content: 'Sin permiso Fundacion.', flags: MessageFlags.Ephemeral });
       return;
     }
     if (lado === 'miembro' && interaction.user.id !== row.miembro_id && !esAdminDiscord(interaction)) {
-      await interaction.reply({ content: 'Solo el miembro contratado puede firmar aqui.', flags: MessageFlags.Ephemeral });
+      await interaction.reply({ content: 'Solo el miembro contratado.', flags: MessageFlags.Ephemeral });
       return;
     }
     return aplicarFirmaGuardada(interaction, row, lado, accion === 'usar_imagen' ? 'imagen' : 'texto');
   }
 
-  // --- Botones del mensaje del contrato ---
   const contratoId = args[0];
   if (!contratoId) {
     await interaction.reply({ content: 'Contrato no encontrado.', flags: MessageFlags.Ephemeral }).catch(() => {});
