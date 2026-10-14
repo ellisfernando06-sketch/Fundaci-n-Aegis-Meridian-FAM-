@@ -59,33 +59,33 @@ function itemCatalogo(key) {
   if (!key) return null;
   const cargo = getCargoPorKey(key);
   if (cargo) return cargo;
-  const jer = getJerarquiaCompleta().find((i) => i.key === key);
-  return jer || null;
+  return getJerarquiaCompleta().find((i) => i.key === key) || null;
 }
 
-/**
- * Resuelve role_id: 1) roles_map 2) nombre oficial / base en el servidor.
- * Si lo encuentra por nombre, lo guarda en el mapa.
- */
+/** Resuelve role_id: mapa → nombre oficial en el guild. */
 function roleIdDeCargo(cargoKey, guild = null) {
   const row = getDb().prepare('SELECT role_id FROM roles_map WHERE cargo_key = ?').get(cargoKey);
-  if (row?.role_id) return row.role_id;
+  if (row?.role_id) {
+    if (!guild || guild.roles.cache.has(row.role_id)) return row.role_id;
+  }
 
   if (!guild) return null;
 
   const item = itemCatalogo(cargoKey);
   if (!item) return null;
 
-  const oficial = normalizar(item.nombreRol || item.nombre || '');
-  const base = normalizar(item.nombre || nombreBaseRol?.(item.nombreRol) || '');
+  const oficial = normalizar(item.nombreRol || '');
+  const base = normalizar(item.nombre || '');
+  const keyNorm = normalizar(String(cargoKey).replace(/\./g, ' '));
 
   for (const [, rol] of guild.roles.cache) {
     if (rol.managed || rol.id === guild.id) continue;
     const n = normalizar(rol.name);
-    const nb = normalizar(nombreBaseRol ? nombreBaseRol(rol.name) : rol.name);
+    const nb = normalizar(typeof nombreBaseRol === 'function' ? nombreBaseRol(rol.name) : rol.name);
     if (
       (oficial && (n === oficial || nb === oficial)) ||
-      (base && (nb === base || n.includes(base)))
+      (base && base.length > 3 && (nb === base || n.endsWith(base) || n.includes(base))) ||
+      (keyNorm && n.includes(keyNorm))
     ) {
       guardarMapa(cargoKey, rol.id, rol.name);
       return rol.id;
@@ -117,6 +117,8 @@ function areaKey(area) {
 
 async function addRoleByKey(guild, member, key, reason) {
   if (!guild || !member || !key) return { ok: false, motivo: 'parametros' };
+
+  await guild.roles.fetch().catch(() => {});
 
   const id = roleIdDeCargo(key, guild);
   if (!id) {
@@ -159,16 +161,44 @@ async function removeRoleByKey(guild, member, key, reason) {
   return true;
 }
 
+/** Quita todos los roles de cargo del organigrama (mapa + coincidencia por nombre). */
 async function quitarRolesDeOrganigrama(member) {
-  const map = getDb().prepare('SELECT role_id, cargo_key FROM roles_map').all();
+  const guild = member.guild;
+  await guild.roles.fetch().catch(() => {});
+
+  const aQuitar = new Set();
   const organigramaKeys = new Set(getTodosCargos().map((c) => c.key));
-  const aQuitar = [];
+  const map = getDb().prepare('SELECT role_id, cargo_key FROM roles_map').all();
+
   for (const row of map) {
     if (!organigramaKeys.has(row.cargo_key)) continue;
-    if (member.roles.cache.has(row.role_id)) aQuitar.push(row.role_id);
+    if (member.roles.cache.has(row.role_id)) aQuitar.add(row.role_id);
   }
-  if (aQuitar.length) {
-    await member.roles.remove(aQuitar, 'Aegis · cambio de cargo').catch(() => {});
+
+  // Por nombre: cualquier rol del miembro que coincida con un cargo del organigrama
+  const cargos = getTodosCargos();
+  for (const [, rol] of member.roles.cache) {
+    if (rol.managed || rol.id === guild.id) continue;
+    const n = normalizar(rol.name);
+    const nb = normalizar(typeof nombreBaseRol === 'function' ? nombreBaseRol(rol.name) : rol.name);
+    for (const c of cargos) {
+      const oficial = normalizar(c.nombreRol || '');
+      const base = normalizar(c.nombre || '');
+      if (
+        (oficial && (n === oficial || nb === oficial)) ||
+        (base && base.length > 3 && (nb === base || n.endsWith(base)))
+      ) {
+        aQuitar.add(rol.id);
+        guardarMapa(c.key, rol.id, rol.name);
+        break;
+      }
+    }
+  }
+
+  if (aQuitar.size) {
+    await member.roles
+      .remove([...aQuitar], 'Aegis · cambio de cargo')
+      .catch((err) => console.error('[roles] quitar organigrama', err.message));
   }
 }
 
@@ -196,9 +226,9 @@ function asegurarPerfil(discordId) {
 
 async function aplicarCuarentena(guild, member) {
   asegurarPerfil(member.id);
-  getDb().prepare(
-    `UPDATE perfiles SET estado = 'Visitante', actualizado_en = datetime('now') WHERE discord_id = ?`
-  ).run(member.id);
+  getDb()
+    .prepare(`UPDATE perfiles SET estado = 'Visitante', actualizado_en = datetime('now') WHERE discord_id = ?`)
+    .run(member.id);
   await addRoleByKey(guild, member, ESTADO.VISITANTE, 'Aegis · ingreso · cuarentena');
   await removeRoleByKey(guild, member, ESTADO.MIEMBRO, 'Aegis · ingreso · cuarentena');
   auditoria.registrar(member.id, 'INGRESO.CUARENTENA', {});
@@ -211,7 +241,9 @@ async function promoverAMiembro(guild, member, areaKeyRaw, actorTag) {
   await addRoleByKey(guild, member, ESTADO.MIEMBRO, `Aegis · aprobado · ${actorTag}`);
   await addRoleByKey(guild, member, ESTADO.VERIFICADO, `Aegis · aprobado · ${actorTag}`);
   if (areaKeyRaw) {
-    await setArea(guild, member, areaKeyRaw, actorTag);
+    await setArea(guild, member, areaKeyRaw, actorTag).catch((err) => {
+      console.warn('[promover area]', err.message);
+    });
   }
   db.prepare(`UPDATE perfiles SET estado = 'Activo', actualizado_en = datetime('now') WHERE discord_id = ?`).run(member.id);
   auditoria.registrar(member.id, 'MIEMBRO.PROMOVER', { area: areaKeyRaw, actor: actorTag });
@@ -225,9 +257,20 @@ function siguienteHistorial() {
   return `AP-${String(nuevo).padStart(4, '0')}`;
 }
 
+/**
+ * Asigna cargo del organigrama:
+ * 1) Quita cargos previos (Discord)
+ * 2) Otorga rol Discord del cargo
+ * 3) Otorga rol Discord del area
+ * 4) Actualiza ficha (cargo + area)
+ * 5) Miembro / quita Visitante
+ */
 async function asignarCargo(guild, member, cargoKey, actorTag, motivo = null) {
   const cargo = getCargoPorKey(cargoKey);
   if (!cargo) throw new Error('Cargo no encontrado en el organigrama');
+
+  await guild.roles.fetch().catch(() => {});
+  await member.fetch(true).catch(() => {});
 
   const db = getDb();
   const perfil = asegurarPerfil(member.id);
@@ -235,41 +278,57 @@ async function asignarCargo(guild, member, cargoKey, actorTag, motivo = null) {
 
   await quitarRolesDeOrganigrama(member);
 
-  const otorgado = await addRoleByKey(
+  // 1) Rol Discord del cargo (obligatorio)
+  const rolCargo = await addRoleByKey(
     guild,
     member,
     cargoKey,
     `Aegis · cargo ${cargo.nombre} · ${actorTag}`
   );
 
-  if (!otorgado.ok) {
-    if (otorgado.motivo === 'sin_mapa') {
+  if (!rolCargo.ok) {
+    if (rolCargo.motivo === 'sin_mapa') {
       throw new Error(
-        `No hay rol Discord mapeado para «${cargo.nombre}». ` +
-        'Ejecuta /config_roles → Crear roles (y Ordenar). ' +
-        'El rol del bot debe quedar por encima del cargo.'
+        `No hay rol Discord para el cargo «${cargo.nombre}» (${cargo.nombreRol || cargoKey}). ` +
+          'Ejecuta /config_roles → Crear roles y Ordenar. ' +
+          'El rol del bot debe quedar por encima de ese cargo.'
       );
     }
-    if (otorgado.motivo === 'jerarquia') {
+    if (rolCargo.motivo === 'jerarquia') {
       throw new Error(
-        `El bot no puede asignar «${otorgado.nombre || cargo.nombre}» ` +
-        '(jerarquia: sube el rol del bot por encima de ese cargo).'
+        `El bot no puede asignar el rol «${rolCargo.nombre || cargo.nombre}». ` +
+          'Sube el rol del bot por encima de ese cargo en Ajustes del servidor → Roles.'
       );
     }
-    throw new Error(`No se pudo otorgar el rol: ${otorgado.motivo}`);
+    throw new Error(`No se pudo otorgar el rol de cargo: ${rolCargo.motivo}`);
   }
 
+  // 2) Rol Discord del area (si existe; no bloquea el cargo)
+  let rolArea = null;
+  let areaNombre = cargo.nombreRama || cargo.rama || null;
   if (cargo.rama) {
-    await setArea(guild, member, cargo.rama, actorTag);
+    try {
+      const r = await setArea(guild, member, cargo.rama, actorTag);
+      rolArea = r.rolOtorgado || null;
+      areaNombre = r.area || areaNombre;
+    } catch (err) {
+      console.warn('[asignarCargo area]', err.message);
+      // Actualiza ficha de area aunque no haya rol Discord
+      db.prepare(
+        `UPDATE perfiles SET area = ?, actualizado_en = datetime('now') WHERE discord_id = ?`
+      ).run(areaNombre, member.id);
+    }
   }
 
+  // 3) Ficha: cargo + area
   db.prepare(`
     UPDATE perfiles SET cargo = ?, area = ?, estado = 'Activo', actualizado_en = datetime('now')
     WHERE discord_id = ?
-  `).run(cargo.nombre, cargo.nombreRama || cargo.rama, member.id);
+  `).run(cargo.nombre, areaNombre, member.id);
 
+  // 4) Estado miembro
   await removeRoleByKey(guild, member, ESTADO.VISITANTE, `Aegis · cargo · ${actorTag}`);
-  await addRoleByKey(guild, member, ESTADO.MIEMBRO, `Aegis · cargo · ${actorTag}`);
+  const rolMiembro = await addRoleByKey(guild, member, ESTADO.MIEMBRO, `Aegis · cargo · ${actorTag}`);
 
   const num = siguienteHistorial();
   db.prepare(`
@@ -278,7 +337,7 @@ async function asignarCargo(guild, member, cargoKey, actorTag, motivo = null) {
   `).run(
     num,
     member.id,
-    cargo.nombreRama || cargo.rama,
+    areaNombre,
     rangoAnterior,
     cargo.nombre,
     actorTag,
@@ -289,21 +348,27 @@ async function asignarCargo(guild, member, cargoKey, actorTag, motivo = null) {
     cargoKey,
     actor: actorTag,
     motivo,
-    rolDiscord: otorgado.nombre,
+    rolCargo: rolCargo.nombre,
+    rolArea,
   });
 
   return {
     cargo,
     numeroHistorial: num,
     rangoAnterior,
-    rolOtorgado: otorgado.nombre,
-    rolId: otorgado.id,
+    rolOtorgado: rolCargo.nombre,
+    rolId: rolCargo.id,
+    rolArea,
+    area: areaNombre,
+    rolMiembro: rolMiembro.ok ? rolMiembro.nombre : null,
   };
 }
 
 async function setAutorizacion(guild, member, nivel, actorTag, motivo = null) {
   const n = Number(nivel);
   if (Number.isNaN(n) || n < 0 || n > 5) throw new Error('Nivel invalido');
+
+  await guild.roles.fetch().catch(() => {});
 
   const perfil = asegurarPerfil(member.id);
   const anterior = perfil?.nivel_auth ?? 0;
@@ -325,9 +390,9 @@ async function setAutorizacion(guild, member, nivel, actorTag, motivo = null) {
     throw new Error(`El bot no puede asignar el rol de Nivel ${n} (jerarquia).`);
   }
 
-  getDb().prepare(
-    `UPDATE perfiles SET nivel_auth = ?, actualizado_en = datetime('now') WHERE discord_id = ?`
-  ).run(n, member.id);
+  getDb()
+    .prepare(`UPDATE perfiles SET nivel_auth = ?, actualizado_en = datetime('now') WHERE discord_id = ?`)
+    .run(n, member.id);
 
   auditoria.registrar(member.id, 'AUTH.OTORGAR', {
     nivel: n,
@@ -341,6 +406,8 @@ async function setAutorizacion(guild, member, nivel, actorTag, motivo = null) {
 
 async function setArea(guild, member, area, actorTag) {
   if (!area) throw new Error('Area vacia');
+
+  await guild.roles.fetch().catch(() => {});
 
   const keyFull = areaKey(area);
   if (!keyFull) throw new Error('Area no reconocida');
@@ -358,15 +425,19 @@ async function setArea(guild, member, area, actorTag) {
 
   if (!otorgado.ok && otorgado.motivo === 'sin_mapa') {
     throw new Error(
-      `No existe el rol de area «${nombreVisible}». ` +
-      'Ejecuta /config_roles → Crear roles.'
+      `No existe el rol de area «${nombreVisible}». Ejecuta /config_roles → Crear roles.`
+    );
+  }
+  if (!otorgado.ok && otorgado.motivo === 'jerarquia') {
+    throw new Error(
+      `El bot no puede asignar el rol de area «${nombreVisible}» (jerarquia).`
     );
   }
 
   asegurarPerfil(member.id);
-  getDb().prepare(
-    `UPDATE perfiles SET area = ?, actualizado_en = datetime('now') WHERE discord_id = ?`
-  ).run(nombreVisible, member.id);
+  getDb()
+    .prepare(`UPDATE perfiles SET area = ?, actualizado_en = datetime('now') WHERE discord_id = ?`)
+    .run(nombreVisible, member.id);
 
   auditoria.registrar(member.id, 'AREA.ASIGNAR', {
     area: ramaKey,
@@ -383,33 +454,35 @@ async function setArea(guild, member, area, actorTag) {
 
 async function marcarVerificado(guild, member) {
   await addRoleByKey(guild, member, ESTADO.VERIFICADO, 'Aegis · Roblox verificado');
-  getDb().prepare(
-    `UPDATE perfiles SET verificado = 1, actualizado_en = datetime('now') WHERE discord_id = ?`
-  ).run(member.id);
+  getDb()
+    .prepare(`UPDATE perfiles SET verificado = 1, actualizado_en = datetime('now') WHERE discord_id = ?`)
+    .run(member.id);
 }
 
 async function aplicarSuspension(guild, member, actorTag) {
   await addRoleByKey(guild, member, ESTADO.SUSPENDIDO, `Aegis · sancion · ${actorTag}`);
-  getDb().prepare(
-    `UPDATE perfiles SET estado = 'Suspendido', actualizado_en = datetime('now') WHERE discord_id = ?`
-  ).run(member.id);
+  getDb()
+    .prepare(`UPDATE perfiles SET estado = 'Suspendido', actualizado_en = datetime('now') WHERE discord_id = ?`)
+    .run(member.id);
 }
 
 async function levantarSuspension(guild, member, actorTag) {
   await removeRoleByKey(guild, member, ESTADO.SUSPENDIDO, `Aegis · levantamiento · ${actorTag}`);
-  getDb().prepare(
-    `UPDATE perfiles SET estado = 'Activo', actualizado_en = datetime('now') WHERE discord_id = ?`
-  ).run(member.id);
+  getDb()
+    .prepare(`UPDATE perfiles SET estado = 'Activo', actualizado_en = datetime('now') WHERE discord_id = ?`)
+    .run(member.id);
 }
 
 async function otorgarLlave(guild, member, llaveId, actorTag, motivo = null) {
   const db = getDb();
+  await guild.roles.fetch().catch(() => {});
+
   const llave = db.prepare('SELECT * FROM llaves WHERE id = ? AND activa = 1').get(llaveId);
   if (!llave) throw new Error('Llave no encontrada');
 
-  const ya = db.prepare(
-    'SELECT id FROM llaves_titulares WHERE llave_id = ? AND discord_id = ? AND activa = 1'
-  ).get(llaveId, member.id);
+  const ya = db
+    .prepare('SELECT id FROM llaves_titulares WHERE llave_id = ? AND discord_id = ? AND activa = 1')
+    .get(llaveId, member.id);
   if (ya) throw new Error('El miembro ya tiene esta llave');
 
   db.prepare(`
@@ -493,7 +566,9 @@ async function revocarLlave(guild, member, llaveId, actorTag) {
   if (roleId && member.roles.cache.has(roleId)) {
     const rol = guild.roles.cache.get(roleId);
     if (rol?.editable) {
-      await member.roles.remove(rol, `Aegis · revocar llave ${llaveId} · ${actorTag}`).catch(() => {});
+      await member.roles
+        .remove(rol, `Aegis · revocar llave ${llaveId} · ${actorTag}`)
+        .catch(() => {});
     }
   }
 
