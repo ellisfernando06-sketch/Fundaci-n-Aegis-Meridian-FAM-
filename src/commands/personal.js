@@ -6,7 +6,6 @@ const {
 const { getDb } = require('../db');
 const { getTodosCargos, getCargoPorKey } = require('../data/organigrama');
 const { asignarCargo } = require('../services/roles');
-const auditoria = require('../services/auditoria');
 const { embedBase, COLORES } = require('../utils/plantillas');
 const { sanitizar, truncar } = require('../utils/helpers');
 
@@ -110,7 +109,10 @@ module.exports = {
             campos: [
               { name: 'Miembro', value: `<@${member.id}>`, inline: true },
               { name: 'Cargo', value: result.cargo.nombreRol || result.cargo.nombre, inline: true },
+              { name: 'Rol Discord', value: result.rolOtorgado || '—', inline: true },
               { name: 'Anterior', value: result.rangoAnterior || '—', inline: true },
+              { name: 'Historial', value: result.numeroHistorial || '—', inline: true },
+              { name: 'Emitida por', value: interaction.user.tag, inline: true },
               { name: 'Motivo', value: motivo || '—', inline: false },
             ],
             footer: 'Personal',
