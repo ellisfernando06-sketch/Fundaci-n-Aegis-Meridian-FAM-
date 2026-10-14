@@ -32,6 +32,8 @@ function asegurarTablas() {
       discord_id TEXT PRIMARY KEY,
       texto TEXT,
       imagen_url TEXT,
+      imagen_b64 TEXT,
+      imagen_tipo TEXT,
       tipo_preferido TEXT DEFAULT 'texto',
       creado_en TEXT DEFAULT (datetime('now')),
       actualizado_en TEXT DEFAULT (datetime('now'))
@@ -54,6 +56,8 @@ function asegurarTablas() {
     );
   `);
   try { db.exec('ALTER TABLE firmas_digitales ADD COLUMN imagen_url TEXT'); } catch (_) {}
+  try { db.exec('ALTER TABLE firmas_digitales ADD COLUMN imagen_b64 TEXT'); } catch (_) {}
+  try { db.exec('ALTER TABLE firmas_digitales ADD COLUMN imagen_tipo TEXT'); } catch (_) {}
   try { db.exec("ALTER TABLE firmas_digitales ADD COLUMN tipo_preferido TEXT DEFAULT 'texto'"); } catch (_) {}
   try { db.exec('ALTER TABLE contratos ADD COLUMN roles_aplicados INTEGER DEFAULT 0'); } catch (_) {}
 }
@@ -206,7 +210,7 @@ async function actualizarMensajeContrato(interaction, row) {
 async function menuFirma(interaction, retorno) {
   const firma = obtenerFirma(interaction.user.id);
   const tieneTexto = !!(firma && firma.texto);
-  const tieneImg = !!(firma && firma.imagen_url);
+  const tieneImg = !!(firma && (firma.imagen_b64 || firma.imagen_url));
   if (!tieneTexto && !tieneImg) {
     await interaction.reply({
       embeds: [embedBase({
@@ -234,7 +238,7 @@ async function menuFirma(interaction, retorno) {
       titulo: 'Tu firma digital',
       descripcion: (tieneTexto ? `Texto: **${firma.texto}**\n` : '') + (tieneImg ? 'Imagen lista\n' : '') + 'Se insertara solo en el Word.',
       footer: 'Contratos',
-      thumbnail: tieneImg ? firma.imagen_url : null,
+      thumbnail: firma.imagen_url || null,
     })],
     components: [
       row1,
@@ -251,7 +255,7 @@ async function aplicarFirmaGuardada(interaction, row, lado, tipo) {
   const firmaDb = obtenerFirma(interaction.user.id);
   if (!firmaDb) return menuFirma(interaction, `${lado}:${row.id}`);
   const usarImagen = tipo === 'imagen';
-  if (usarImagen && !firmaDb.imagen_url) {
+  if (usarImagen && !firmaDb.imagen_b64 && !firmaDb.imagen_url) {
     await interaction.reply({ content: 'No tienes imagen. Usa `/firma imagen` y adjunta el archivo.', flags: MessageFlags.Ephemeral });
     return;
   }
@@ -265,6 +269,8 @@ async function aplicarFirmaGuardada(interaction, row, lado, tipo) {
     tipo: usarImagen ? 'imagen' : 'texto',
     texto: firmaDb.texto || null,
     imagenUrl: usarImagen ? firmaDb.imagen_url : null,
+    imagenB64: usarImagen ? (firmaDb.imagen_b64 || null) : null,
+    imagenTipo: usarImagen ? (firmaDb.imagen_tipo || 'png') : null,
     cargo: lado === 'fundacion' ? cargoFirmante(interaction) : `${row.personaje} · ${row.rango}`,
     discordId: interaction.user.id,
     fecha,
@@ -292,7 +298,7 @@ async function iniciarSubidaImagen(interaction) {
       titulo: 'Firma por imagen',
       descripcion:
         'Adjunta el archivo **dentro del comando**:\n\n' +
-        '`/firma imagen` → opción **archivo** (PNG/JPG/WebP)\n\n' +
+        '`/firma imagen` → opción **archivo** (PNG o JPG)\n\n' +
         'Cuando quede guardada, vuelve a pulsar **Firmar** y elige **Usar firma por imagen**.\n' +
         'La firma se inserta solo en el Word.',
       footer: 'Firmas · /firma',
@@ -340,7 +346,7 @@ async function handle(interaction, accion, args) {
           await interaction.editReply({ content: 'Firma guardada.' }); return;
         }
         const payloadFirma = {
-          tipo: 'texto', texto, imagenUrl: null,
+          tipo: 'texto', texto, imagenUrl: null, imagenB64: null,
           cargo: lado === 'fundacion' ? cargoFirmante(interaction) : `${row.personaje} · ${row.rango}`,
           discordId: interaction.user.id, fecha: new Date().toLocaleString('es-PA'),
         };
