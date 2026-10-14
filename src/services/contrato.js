@@ -1,6 +1,6 @@
 /**
- * Genera Contrato de Ingreso F.A.M. en formato .docx editable.
- * Contenido alineado al documento oficial (politicas, servicio, silencio, sanciones).
+ * Genera Contrato de Ingreso F.A.M. en .docx editable.
+ * Soporta firmas digitales de Fundacion y Miembro.
  */
 
 const {
@@ -33,11 +33,10 @@ function celda(texto, opts = {}) {
     align = AlignmentType.LEFT,
     size = 18,
     color = '1A1A2E',
-    borders = BORDES_FINOS,
   } = opts;
   return new TableCell({
     width: { size: width, type: WidthType.DXA },
-    borders,
+    borders: BORDES_FINOS,
     shading: fill ? { type: ShadingType.CLEAR, fill } : undefined,
     children: [
       new Paragraph({
@@ -63,7 +62,14 @@ function tituloSeccion(romano, titulo) {
     rows: [
       new TableRow({
         children: [
-          celda(romano, { bold: true, width: 900, fill: '1A1A2E', color: 'C9A227', align: AlignmentType.CENTER, size: 20 }),
+          celda(romano, {
+            bold: true,
+            width: 900,
+            fill: '1A1A2E',
+            color: 'C9A227',
+            align: AlignmentType.CENTER,
+            size: 20,
+          }),
           celda(titulo, { bold: true, width: 8460, fill: 'F5F0E6', size: 20 }),
         ],
       }),
@@ -96,35 +102,99 @@ function linea() {
   });
 }
 
+function bloqueFirma({ titulo, nombre, cargo, firmado, fechaFirma }) {
+  const lineas = [];
+  if (firmado) {
+    lineas.push(
+      new Paragraph({
+        alignment: AlignmentType.CENTER,
+        children: [
+          new TextRun({
+            text: nombre || '—',
+            bold: true,
+            italics: true,
+            size: 22,
+            font: 'Brush Script MT',
+            color: '1A1A2E',
+          }),
+        ],
+      })
+    );
+    lineas.push(
+      new Paragraph({
+        alignment: AlignmentType.CENTER,
+        children: [
+          new TextRun({
+            text: `Firmado digitalmente · ${fechaFirma || ''}`,
+            size: 14,
+            font: 'Times New Roman',
+            color: '1D9E75',
+          }),
+        ],
+      })
+    );
+  } else {
+    lineas.push(
+      new Paragraph({
+        alignment: AlignmentType.CENTER,
+        children: [
+          new TextRun({
+            text: '_______________________________',
+            size: 18,
+            font: 'Times New Roman',
+          }),
+        ],
+      })
+    );
+  }
+  lineas.push(
+    new Paragraph({
+      alignment: AlignmentType.CENTER,
+      children: [
+        new TextRun({
+          text: titulo,
+          bold: true,
+          size: 18,
+          font: 'Times New Roman',
+        }),
+      ],
+    })
+  );
+  if (cargo) {
+    lineas.push(
+      new Paragraph({
+        alignment: AlignmentType.CENTER,
+        children: [
+          new TextRun({
+            text: cargo,
+            size: 16,
+            font: 'Times New Roman',
+            color: '6B6B6B',
+          }),
+        ],
+      })
+    );
+  }
+  return new TableCell({
+    width: { size: 4680, type: WidthType.DXA },
+    borders: SIN_BORDES,
+    children: lineas,
+  });
+}
+
 /**
  * @param {object} datos
- * @param {string} datos.miembro - nombre del personaje / miembro
- * @param {string} datos.discord - tag o mencion legible
- * @param {string} datos.rango - rango / direccion
- * @param {string} datos.fecha - fecha de ingreso
- * @param {string} [datos.fundador] - nombre del firmante fundacion
  */
 async function generarContrato(datos) {
   const miembro = datos.miembro || '________________';
   const discord = datos.discord || '________________';
   const rango = datos.rango || '________________';
   const fecha = datos.fecha || new Date().toLocaleDateString('es-PA');
-  const fundador = datos.fundador || 'Ing. F. Ellis';
+
+  const firmaFundacion = datos.firmaFundacion || null;
+  const firmaMiembro = datos.firmaMiembro || null;
 
   const doc = new Document({
-    styles: {
-      default: {
-        document: {
-          styles: [
-            {
-              id: 'Normal',
-              name: 'Normal',
-              run: { font: 'Times New Roman', size: 18 },
-            },
-          ],
-        },
-      },
-    },
     sections: [
       {
         properties: {
@@ -169,7 +239,7 @@ async function generarContrato(datos) {
                 alignment: AlignmentType.CENTER,
                 children: [
                   new TextRun({
-                    text: 'FUNDACIÓN AEGIS MERIDIAN  ·  PRIVADA E INDEPENDIENTE  ·  EST. 1991  ·  DOCUMENTO DE USO INTERNO  ·  ',
+                    text: 'FUNDACIÓN AEGIS MERIDIAN  ·  DOCUMENTO DE USO INTERNO  ·  ',
                     size: 12,
                     font: 'Times New Roman',
                     color: '6B6B6B',
@@ -260,8 +330,20 @@ async function generarContrato(datos) {
             rows: [
               new TableRow({
                 children: [
-                  celda('FALTA', { bold: true, fill: '1A1A2E', color: 'C9A227', width: 4680, align: AlignmentType.CENTER }),
-                  celda('SANCIÓN', { bold: true, fill: '1A1A2E', color: 'C9A227', width: 4680, align: AlignmentType.CENTER }),
+                  celda('FALTA', {
+                    bold: true,
+                    fill: '1A1A2E',
+                    color: 'C9A227',
+                    width: 4680,
+                    align: AlignmentType.CENTER,
+                  }),
+                  celda('SANCIÓN', {
+                    bold: true,
+                    fill: '1A1A2E',
+                    color: 'C9A227',
+                    width: 4680,
+                    align: AlignmentType.CENTER,
+                  }),
                 ],
               }),
               new TableRow({
@@ -313,58 +395,21 @@ async function generarContrato(datos) {
             rows: [
               new TableRow({
                 children: [
-                  new TableCell({
-                    width: { size: 4680, type: WidthType.DXA },
-                    borders: SIN_BORDES,
-                    children: [
-                      new Paragraph({
-                        alignment: AlignmentType.CENTER,
-                        children: [
-                          new TextRun({ text: '_______________________________', size: 18, font: 'Times New Roman' }),
-                        ],
-                      }),
-                      new Paragraph({
-                        alignment: AlignmentType.CENTER,
-                        children: [
-                          new TextRun({ text: fundador, bold: true, size: 18, font: 'Times New Roman' }),
-                        ],
-                      }),
-                      new Paragraph({
-                        alignment: AlignmentType.CENTER,
-                        children: [
-                          new TextRun({ text: 'Fundador de F.A.M.', size: 16, font: 'Times New Roman', color: '6B6B6B' }),
-                        ],
-                      }),
-                    ],
+                  bloqueFirma({
+                    titulo: firmaFundacion?.nombre || 'Representante de F.A.M.',
+                    nombre: firmaFundacion?.nombre,
+                    cargo: firmaFundacion?.cargo || 'Fundador / Cofundador',
+                    firmado: !!firmaFundacion,
+                    fechaFirma: firmaFundacion?.fecha,
                   }),
-                  new TableCell({
-                    width: { size: 4680, type: WidthType.DXA },
-                    borders: SIN_BORDES,
-                    children: [
-                      new Paragraph({
-                        alignment: AlignmentType.CENTER,
-                        children: [
-                          new TextRun({ text: '_______________________________', size: 18, font: 'Times New Roman' }),
-                        ],
-                      }),
-                      new Paragraph({
-                        alignment: AlignmentType.CENTER,
-                        children: [
-                          new TextRun({ text: 'Firma del Miembro', bold: true, size: 18, font: 'Times New Roman' }),
-                        ],
-                      }),
-                      new Paragraph({
-                        alignment: AlignmentType.CENTER,
-                        children: [
-                          new TextRun({
-                            text: `[${miembro} · ${rango}]`,
-                            size: 16,
-                            font: 'Times New Roman',
-                            color: '6B6B6B',
-                          }),
-                        ],
-                      }),
-                    ],
+                  bloqueFirma({
+                    titulo: 'Firma del Miembro',
+                    nombre: firmaMiembro?.nombre || miembro,
+                    cargo: firmaMiembro
+                      ? `[${miembro} · ${rango}]`
+                      : `[${miembro} · ${rango}]`,
+                    firmado: !!firmaMiembro,
+                    fechaFirma: firmaMiembro?.fecha,
                   }),
                 ],
               }),
@@ -375,8 +420,7 @@ async function generarContrato(datos) {
     ],
   });
 
-  const buffer = await Packer.toBuffer(doc);
-  return buffer;
+  return Packer.toBuffer(doc);
 }
 
 module.exports = { generarContrato };
