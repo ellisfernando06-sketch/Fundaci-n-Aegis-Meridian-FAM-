@@ -16,12 +16,18 @@ const REQUISITOS = {
   postulacion: { allowPublic: true },
   tickets: { allowPublic: true },
   tienda: { allowPublic: true },
+  firma: { allowPublic: true },
+  radio: { allowPublic: true },
+  turno: { allowPublic: true },
+  registro: { allowPublic: true },
+  zona: { allowPublic: true },
 
   config: { soloAdmin: true },
   config_roles: { soloAdmin: true },
   config_llaves: { soloAdmin: true },
   config_canales: { soloAdmin: true },
   eliminar_roles: { soloAdmin: true },
+  bienvenida: { soloAdmin: true },
 
   personal: {
     nivelMin: 1,
@@ -68,6 +74,11 @@ const REQUISITOS = {
     nivelMin: 2,
     keys: ['KEY-SEG-02', 'KEY-SEG-03', 'KEY-SEG-04', 'KEY-FTM-02', 'KEY-ERR-02'],
     cargos: ['SEG.COMANDANTE', 'DIR.GENERAL', 'SI.GERENTE'],
+  },
+  briefing: {
+    nivelMin: 1,
+    keys: ['KEY-SEG-02', 'KEY-SEG-03', 'KEY-SEG-04', 'KEY-CUP-01'],
+    cargos: ['SEG.COMANDANTE', 'DIR.GENERAL', 'SI.GERENTE', 'ST.FUNDADOR', 'ST.CO_CALIDAD'],
   },
 
   sancion: {
