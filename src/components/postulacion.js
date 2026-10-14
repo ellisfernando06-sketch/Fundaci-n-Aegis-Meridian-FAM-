@@ -6,6 +6,9 @@ const { sanitizar, truncar } = require('../utils/helpers');
 
 const prefix = 'postulacion';
 
+/** Canal fijo de postulaciones / hojas de vida RP */
+const CANAL_POSTULACIONES = '1559071665231765567';
+
 function asegurarTabla() {
   getDb().exec(`
     CREATE TABLE IF NOT EXISTS postulaciones (
@@ -64,15 +67,31 @@ async function handle(interaction, accion, args) {
     footer: 'Postulaciones',
   });
 
-  const destId =
-    getConfig('canal_solicitudes') ||
-    getConfig('canal_fichas') ||
-    getConfig('canal_logs');
-
-  if (destId && interaction.guild) {
-    const ch = await interaction.guild.channels.fetch(destId).catch(() => null);
+  let publicado = false;
+  if (interaction.guild) {
+    const ch = await interaction.guild.channels.fetch(CANAL_POSTULACIONES).catch(() => null);
     if (ch?.isTextBased()) {
-      await ch.send({ content: `Nueva postulacion **${id}**`, embeds: [embed] });
+      await ch.send({
+        content: `Nueva postulacion **${id}** · <@${interaction.user.id}>`,
+        embeds: [embed],
+      });
+      publicado = true;
+    } else {
+      // Fallback a config si el canal fijo no esta disponible
+      const destId =
+        getConfig('canal_solicitudes') ||
+        getConfig('canal_fichas') ||
+        getConfig('canal_logs');
+      if (destId) {
+        const ch2 = await interaction.guild.channels.fetch(destId).catch(() => null);
+        if (ch2?.isTextBased()) {
+          await ch2.send({
+            content: `Nueva postulacion **${id}** · <@${interaction.user.id}>`,
+            embeds: [embed],
+          });
+          publicado = true;
+        }
+      }
     }
   }
 
@@ -82,12 +101,13 @@ async function handle(interaction, accion, args) {
         color: COLORES.medicina,
         titulo: 'Postulacion enviada',
         descripcion:
-          `Tu hoja de vida RP (**${id}**) fue registrada.\n` +
-          'La Fundacion revisara tu solicitud. Si es aprobada, se emitira un contrato de ingreso.',
+          `Tu hoja de vida RP (**${id}**) fue registrada` +
+          (publicado ? ' y enviada al canal de postulaciones.' : '.') +
+          '\nLa Fundacion revisara tu solicitud. Si es aprobada, se emitira un contrato de ingreso.',
         footer: 'Postulaciones',
       }),
     ],
   });
 }
 
-module.exports = { prefix, handle };
+module.exports = { prefix, handle, CANAL_POSTULACIONES };
