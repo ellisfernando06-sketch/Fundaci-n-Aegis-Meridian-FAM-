@@ -78,6 +78,25 @@ const REQUISITOS = {
     keys: ['KEY-SI-02', 'KEY-SI-03', 'KEY-INT-02', 'KEY-INT-03', 'KEY-ESP-09'],
     cargos: ['SI.GERENTE', 'SI.JEFE', 'INT.GERENTE', 'DIR.GENERAL', 'ST.FUNDADOR'],
   },
+
+  // Seguridad Interna · operativo
+  si: {
+    nivelMin: 1,
+    keys: ['KEY-SI-01', 'KEY-SI-02', 'KEY-SI-03'],
+    cargos: [
+      'SI.GERENTE',
+      'SI.JEFE',
+      'SI.SUPERVISOR',
+      'SI.INTERROGATORIO',
+      'SI.AGENTE_CAMPO',
+      'SI.AGENTE',
+      'SI.INGRESO',
+      'DIR.GENERAL',
+      'ST.FUNDADOR',
+      'ST.CO_CALIDAD',
+      'ST.CO_ESTRATEGIA',
+    ],
+  },
 };
 
 function esAdminDiscord(interaction) {
