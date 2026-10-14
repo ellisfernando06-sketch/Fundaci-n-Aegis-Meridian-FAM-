@@ -10,8 +10,8 @@ const { embedBase, COLORES } = require('../utils/plantillas');
 const { truncar } = require('../utils/helpers');
 
 const AREAS = Object.entries(ORGANIGRAMA).map(([key, rama]) => ({
-  name: rama.nombre.slice(0, 100),
-  value: rama.nombre.slice(0, 100),
+  name: String(rama.nombre).slice(0, 100),
+  value: key.slice(0, 100),
 }));
 
 module.exports = {
@@ -70,10 +70,11 @@ module.exports = {
     }
 
     if (sub === 'listar') {
-      const area = interaction.options.getString('area');
+      const areaKey = interaction.options.getString('area');
+      const nombre = ORGANIGRAMA[areaKey]?.nombre || areaKey;
       const rows = db.prepare(
-        'SELECT discord_id, personaje, cargo, numero FROM perfiles WHERE area = ? ORDER BY cargo LIMIT 40'
-      ).all(area);
+        'SELECT discord_id, personaje, cargo, numero FROM perfiles WHERE area = ? OR lower(area) = lower(?) ORDER BY cargo LIMIT 40'
+      ).all(nombre, nombre);
       const desc = rows.length
         ? rows.map((r) =>
           `· <@${r.discord_id}> · ${r.cargo || '—'} · ${r.personaje || r.numero || ''}`
@@ -82,7 +83,7 @@ module.exports = {
       await interaction.reply({
         embeds: [embedBase({
           color: COLORES.seguridad,
-          titulo: `Area · ${area}`,
+          titulo: `Area · ${nombre}`,
           descripcion: truncar(desc, 4000),
           footer: 'Areas',
         })],
@@ -93,7 +94,7 @@ module.exports = {
 
     if (sub === 'asignar') {
       const user = interaction.options.getUser('miembro');
-      const area = interaction.options.getString('area');
+      const areaKey = interaction.options.getString('area');
 
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       const member = await interaction.guild.members.fetch(user.id).catch(() => null);
@@ -123,14 +124,16 @@ module.exports = {
       }
 
       try {
-        await setArea(interaction.guild, member, area, interaction.user.tag);
+        const r = await setArea(interaction.guild, member, areaKey, interaction.user.tag);
         await interaction.editReply({
           embeds: [embedBase({
             color: COLORES.seguridad,
             titulo: 'Area asignada',
             campos: [
               { name: 'Miembro', value: `<@${member.id}>`, inline: true },
-              { name: 'Area', value: area, inline: true },
+              { name: 'Area', value: r.area, inline: true },
+              { name: 'Rol otorgado', value: r.rolOtorgado || '—', inline: true },
+              { name: 'Emitida por', value: interaction.user.tag, inline: false },
             ],
             footer: 'Areas',
           })],
