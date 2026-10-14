@@ -23,12 +23,17 @@ const CARGO_NOMBRE = {
   'ST.CO_ESTRATEGIA': 'Cofundador de Estrategia y Estatuto',
 };
 
+/** pendientes de subida de imagen: discordId -> { lado, contratoId, expira } */
+const pendientesImagen = new Map();
+
 function asegurarTablas() {
   const db = getDb();
   db.exec(`
     CREATE TABLE IF NOT EXISTS firmas_digitales (
       discord_id TEXT PRIMARY KEY,
-      texto TEXT NOT NULL,
+      texto TEXT,
+      imagen_url TEXT,
+      tipo_preferido TEXT DEFAULT 'texto',
       cargo_etiqueta TEXT,
       creado_en TEXT DEFAULT (datetime('now')),
       actualizado_en TEXT DEFAULT (datetime('now'))
@@ -49,6 +54,13 @@ function asegurarTablas() {
       creado_en TEXT DEFAULT (datetime('now'))
     );
   `);
+  // migracion suave si faltan columnas
+  try {
+    db.exec(`ALTER TABLE firmas_digitales ADD COLUMN imagen_url TEXT`);
+  } catch (_) {}
+  try {
+    db.exec(`ALTER TABLE firmas_digitales ADD COLUMN tipo_preferido TEXT DEFAULT 'texto'`);
+  } catch (_) {}
 }
 
 function puedeFirmarFundacion(interaction) {
@@ -87,17 +99,48 @@ function botonesFirma(contratoId, firmaFund, firmaMiembro) {
   ];
 }
 
+function botonesElegirFirma(retorno) {
+  // retorno = fundacion:CTR-xxx | miembro:CTR-xxx | gestionar
+  return [
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`contrato:firma_texto:${retorno}`)
+        .setLabel('Firma de texto')
+        .setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId(`contrato:firma_imagen:${retorno}`)
+        .setLabel('Subir imagen de firma')
+        .setStyle(ButtonStyle.Secondary),
+    ),
+  ];
+}
+
 function embedContrato(row) {
   const ff = row.firma_fundacion_json ? JSON.parse(row.firma_fundacion_json) : null;
   const fm = row.firma_miembro_json ? JSON.parse(row.firma_miembro_json) : null;
-  return embedBase({
+
+  function bloqueFirma(f, pendiente) {
+    if (!f) return pendiente;
+    const lineas = [];
+    if (f.tipo === 'imagen' && f.imagenUrl) {
+      lineas.push('🖼️ Firma por imagen');
+      lineas.push(`[Ver imagen](${f.imagenUrl})`);
+    } else {
+      lineas.push(`✍️ **${f.texto || f.nombre || '—'}**`);
+    }
+    if (f.cargo) lineas.push(f.cargo);
+    if (f.fecha) lineas.push(`_${f.fecha}_`);
+    if (f.discordId) lineas.push(`<@${f.discordId}>`);
+    return lineas.join('\n');
+  }
+
+  const embed = embedBase({
     color: row.estado === 'Completo' ? COLORES.medicina : COLORES.oro,
     author: true,
     titulo: `Contrato de Ingreso · ${row.id}`,
     descripcion:
-      'Documento oficial adjunto (no se modifica).\n' +
-      'Las firmas digitales se registran con los botones.\n' +
-      '**Izquierda:** Fundador / Cofundador · **Derecha:** miembro contratado.',
+      'Documento Word adjunto (no se modifica).\n' +
+      'Firmas digitales por boton. Puedes usar **texto** o **imagen** de tu firma.',
     campos: [
       { name: 'Miembro', value: `<@${row.miembro_id}>`, inline: true },
       { name: 'Personaje', value: row.personaje, inline: true },
@@ -106,47 +149,24 @@ function embedContrato(row) {
       { name: 'Estado', value: row.estado, inline: true },
       { name: 'Emitido por', value: row.emitido_por || '—', inline: true },
       {
-        name: 'Firma digital · Fundacion',
-        value: ff
-          ? `✍️ **${ff.texto}**\n${ff.cargo || ''}\n_${ff.fecha}_ · <@${ff.discordId}>`
-          : '_Pendiente_',
+        name: 'Firma · Fundacion',
+        value: bloqueFirma(ff, '_Pendiente · Fundador / Cofundador_'),
         inline: true,
       },
       {
-        name: 'Firma digital · Miembro',
-        value: fm
-          ? `✍️ **${fm.texto}**\n${fm.cargo || ''}\n_${fm.fecha}_ · <@${fm.discordId}>`
-          : `_Pendiente · <@${row.miembro_id}>_`,
+        name: 'Firma · Miembro',
+        value: bloqueFirma(fm, `_Pendiente · <@${row.miembro_id}>_`),
         inline: true,
       },
     ],
     footer: 'Contratos',
   });
-}
 
-/** Modal para crear/actualizar firma digital del usuario */
-async function pedirCrearFirma(interaction, retorno) {
-  // retorno: fundacion:CTR-0001 | miembro:CTR-0001
-  const modal = new ModalBuilder()
-    .setCustomId(`contrato:guardar_firma:${retorno}`)
-    .setTitle('Crear firma digital');
+  // Miniatura de la ultima firma por imagen (prioridad miembro, luego fundacion)
+  const img = (fm && fm.tipo === 'imagen' && fm.imagenUrl) || (ff && ff.tipo === 'imagen' && ff.imagenUrl);
+  if (img) embed.setThumbnail(img);
 
-  modal.addComponents(
-    new ActionRowBuilder().addComponents(
-      new TextInputBuilder()
-        .setCustomId('texto')
-        .setLabel('Tu firma (como quieres que aparezca)')
-        .setStyle(TextInputStyle.Short)
-        .setRequired(true)
-        .setMaxLength(60)
-        .setPlaceholder('Ej. F. Ellis · o tu nombre completo')
-        .setValue(
-          (interaction.user.globalName || interaction.user.username || '').slice(0, 60)
-        ),
-    ),
-  );
-
-  await interaction.showModal(modal);
+  return embed;
 }
 
 async function actualizarMensajeContrato(interaction, row) {
@@ -168,22 +188,118 @@ async function actualizarMensajeContrato(interaction, row) {
 
   if (interaction.message) {
     await interaction.message.edit(payload).catch(() => {});
+  } else if (row.canal_id && row.msg_id && interaction.guild) {
+    try {
+      const ch = await interaction.guild.channels.fetch(row.canal_id).catch(() => null);
+      const msg = ch ? await ch.messages.fetch(row.msg_id).catch(() => null) : null;
+      if (msg) await msg.edit(payload);
+    } catch (_) {}
   }
 }
 
-async function aplicarFirma(interaction, row, lado) {
-  const firmaDb = obtenerFirma(interaction.user.id);
-  if (!firmaDb) {
-    // Pedir crear firma y recordar a que lado volver
-    await pedirCrearFirma(interaction, `${lado}:${row.id}`);
+/** Menu: elegir tipo de firma o crear si no tiene */
+async function menuFirma(interaction, retorno) {
+  const firma = obtenerFirma(interaction.user.id);
+  const tieneTexto = !!(firma && firma.texto);
+  const tieneImg = !!(firma && firma.imagen_url);
+
+  if (!tieneTexto && !tieneImg) {
+    await interaction.reply({
+      embeds: [
+        embedBase({
+          color: COLORES.oro,
+          titulo: 'No tienes firma digital',
+          descripcion:
+            'Elige como quieres registrar tu firma:\n' +
+            '· **Firma de texto** — escribes tu nombre o rubrica\n' +
+            '· **Subir imagen** — adjunta una imagen de tu firma digitalizada',
+          footer: 'Contratos',
+        }),
+      ],
+      components: botonesElegirFirma(retorno),
+      flags: MessageFlags.Ephemeral,
+    });
     return;
   }
 
-  await interaction.deferUpdate();
+  // Tiene al menos una: ofrecer usar existente o actualizar
+  const rows = [
+    new ActionRowBuilder().addComponents(
+      ...(tieneTexto
+        ? [
+            new ButtonBuilder()
+              .setCustomId(`contrato:usar_texto:${retorno}`)
+              .setLabel('Usar firma de texto')
+              .setStyle(ButtonStyle.Success),
+          ]
+        : []),
+      ...(tieneImg
+        ? [
+            new ButtonBuilder()
+              .setCustomId(`contrato:usar_imagen:${retorno}`)
+              .setLabel('Usar firma por imagen')
+              .setStyle(ButtonStyle.Success),
+          ]
+        : []),
+    ),
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`contrato:firma_texto:${retorno}`)
+        .setLabel(tieneTexto ? 'Cambiar texto' : 'Crear firma de texto')
+        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId(`contrato:firma_imagen:${retorno}`)
+        .setLabel(tieneImg ? 'Cambiar imagen' : 'Subir imagen')
+        .setStyle(ButtonStyle.Secondary),
+    ),
+  ];
+
+  await interaction.reply({
+    embeds: [
+      embedBase({
+        color: COLORES.oro,
+        titulo: 'Tu firma digital',
+        descripcion:
+          (tieneTexto ? `Texto: **${firma.texto}**\n` : '') +
+          (tieneImg ? `Imagen: [ver](${firma.imagen_url})\n` : '') +
+          '\nElige cual usar en este contrato o actualiza tu firma.',
+        footer: 'Contratos',
+        thumbnail: tieneImg ? firma.imagen_url : null,
+      }),
+    ],
+    components: rows,
+    flags: MessageFlags.Ephemeral,
+  });
+}
+
+async function aplicarFirmaGuardada(interaction, row, lado, tipo) {
+  const firmaDb = obtenerFirma(interaction.user.id);
+  if (!firmaDb) {
+    await menuFirma(interaction, `${lado}:${row.id}`);
+    return;
+  }
+
+  const usarImagen = tipo === 'imagen';
+  if (usarImagen && !firmaDb.imagen_url) {
+    await interaction.reply({
+      content: 'No tienes imagen de firma. Usa **Subir imagen**.',
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+  if (!usarImagen && !firmaDb.texto) {
+    await interaction.reply({
+      content: 'No tienes firma de texto. Usa **Firma de texto**.',
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
 
   const fecha = new Date().toLocaleString('es-PA');
   const payloadFirma = {
-    texto: firmaDb.texto,
+    tipo: usarImagen ? 'imagen' : 'texto',
+    texto: firmaDb.texto || null,
+    imagenUrl: usarImagen ? firmaDb.imagen_url : null,
     cargo:
       lado === 'fundacion'
         ? cargoFirmante(interaction)
@@ -192,157 +308,251 @@ async function aplicarFirma(interaction, row, lado) {
     fecha,
   };
 
-  if (lado === 'fundacion') {
-    getDb()
-      .prepare('UPDATE contratos SET firma_fundacion_json = ? WHERE id = ?')
-      .run(JSON.stringify(payloadFirma), row.id);
-    auditoria.registrar(interaction.user.id, 'CONTRATO.FIRMA_FUNDACION', { id: row.id });
-  } else {
-    getDb()
-      .prepare('UPDATE contratos SET firma_miembro_json = ? WHERE id = ?')
-      .run(JSON.stringify(payloadFirma), row.id);
-    auditoria.registrar(interaction.user.id, 'CONTRATO.FIRMA_MIEMBRO', { id: row.id });
-  }
+  const col = lado === 'fundacion' ? 'firma_fundacion_json' : 'firma_miembro_json';
+  getDb()
+    .prepare(`UPDATE contratos SET ${col} = ? WHERE id = ?`)
+    .run(JSON.stringify(payloadFirma), row.id);
+
+  getDb()
+    .prepare(
+      `UPDATE firmas_digitales SET tipo_preferido = ?, actualizado_en = datetime('now') WHERE discord_id = ?`
+    )
+    .run(usarImagen ? 'imagen' : 'texto', interaction.user.id);
+
+  auditoria.registrar(
+    interaction.user.id,
+    lado === 'fundacion' ? 'CONTRATO.FIRMA_FUNDACION' : 'CONTRATO.FIRMA_MIEMBRO',
+    { id: row.id, tipo: payloadFirma.tipo }
+  );
 
   const actualizado = getDb().prepare('SELECT * FROM contratos WHERE id = ?').get(row.id);
-  await actualizarMensajeContrato(interaction, actualizado);
 
-  await interaction
-    .followUp({
+  if (interaction.deferred || interaction.replied) {
+    await actualizarMensajeContrato(interaction, actualizado);
+    await interaction
+      .followUp({
+        embeds: [
+          embedBase({
+            color: COLORES.medicina,
+            titulo: 'Firma aplicada',
+            descripcion: `Se registro tu firma (**${payloadFirma.tipo}**) en el lado **${lado}** del contrato **${row.id}**.`,
+            footer: 'Contratos',
+            thumbnail: payloadFirma.imagenUrl || null,
+          }),
+        ],
+        flags: MessageFlags.Ephemeral,
+      })
+      .catch(() => {});
+  } else {
+    await interaction.deferUpdate().catch(() => {});
+    await actualizarMensajeContrato(interaction, actualizado);
+    await interaction
+      .followUp({
+        embeds: [
+          embedBase({
+            color: COLORES.medicina,
+            titulo: 'Firma aplicada',
+            descripcion: `Se registro tu firma (**${payloadFirma.tipo}**) en el lado **${lado}** del contrato **${row.id}**.`,
+            footer: 'Contratos',
+            thumbnail: payloadFirma.imagenUrl || null,
+          }),
+        ],
+        flags: MessageFlags.Ephemeral,
+      })
+      .catch(() => {});
+  }
+}
+
+async function iniciarSubidaImagen(interaction, retorno) {
+  pendientesImagen.set(interaction.user.id, {
+    retorno,
+    expira: Date.now() + 90_000,
+    channelId: interaction.channelId,
+  });
+
+  await interaction.reply({
+    embeds: [
+      embedBase({
+        color: COLORES.oro,
+        titulo: 'Subir imagen de firma',
+        descripcion:
+          'Envia **en este canal** una imagen (PNG/JPG/WebP) de tu firma en los proximos **90 segundos**.\n' +
+          'Solo se aceptara el mensaje tuyo con un archivo de imagen.',
+        footer: 'Contratos',
+      }),
+    ],
+    flags: MessageFlags.Ephemeral,
+  });
+
+  const filter = (m) =>
+    m.author.id === interaction.user.id &&
+    m.attachments.size > 0 &&
+    m.attachments.some((a) => (a.contentType || '').startsWith('image/') || /\.(png|jpe?g|webp|gif)$/i.test(a.name || ''));
+
+  const collector = interaction.channel.createMessageCollector({
+    filter,
+    max: 1,
+    time: 90_000,
+  });
+
+  collector.on('collect', async (msg) => {
+    const att =
+      msg.attachments.find((a) => (a.contentType || '').startsWith('image/')) ||
+      msg.attachments.first();
+    if (!att) return;
+
+    const url = att.url || att.proxyURL;
+    getDb()
+      .prepare(`
+        INSERT INTO firmas_digitales (discord_id, imagen_url, tipo_preferido, actualizado_en)
+        VALUES (?, ?, 'imagen', datetime('now'))
+        ON CONFLICT(discord_id) DO UPDATE SET
+          imagen_url = excluded.imagen_url,
+          tipo_preferido = 'imagen',
+          actualizado_en = datetime('now')
+      `)
+      .run(interaction.user.id, url);
+
+    pendientesImagen.delete(interaction.user.id);
+    auditoria.registrar(interaction.user.id, 'FIRMA.IMAGEN', { url: url.slice(0, 80) });
+
+    await msg.react('✅').catch(() => {});
+
+    const [lado, contratoId] = String(retorno).split(':');
+    if ((lado === 'fundacion' || lado === 'miembro') && contratoId) {
+      const row = getDb().prepare('SELECT * FROM contratos WHERE id = ?').get(contratoId);
+      if (row) {
+        // validar permiso
+        if (lado === 'fundacion' && !puedeFirmarFundacion(interaction)) {
+          await interaction.followUp({
+            content: 'Imagen guardada. No tienes permiso para firmar por la Fundacion.',
+            flags: MessageFlags.Ephemeral,
+          });
+          return;
+        }
+        if (lado === 'miembro' && interaction.user.id !== row.miembro_id && !esAdminDiscord(interaction)) {
+          await interaction.followUp({
+            content: 'Imagen de firma guardada.',
+            flags: MessageFlags.Ephemeral,
+          });
+          return;
+        }
+        await aplicarFirmaGuardada(interaction, row, lado, 'imagen');
+        return;
+      }
+    }
+
+    await interaction.followUp({
       embeds: [
         embedBase({
           color: COLORES.medicina,
-          titulo: 'Firma digital aplicada',
-          descripcion:
-            `Se registro tu firma **${firmaDb.texto}** en el lado de **${lado === 'fundacion' ? 'Fundacion' : 'Miembro'}** del contrato **${row.id}**.\n\nEl documento Word adjunto no se modifica; la firma queda registrada de forma oficial en el sistema.`,
+          titulo: 'Imagen de firma guardada',
+          descripcion: 'Tu firma por imagen quedo registrada. Al firmar un contrato podras usarla.',
           footer: 'Contratos',
+          thumbnail: url,
         }),
       ],
       flags: MessageFlags.Ephemeral,
-    })
-    .catch(() => {});
+    });
+  });
+
+  collector.on('end', async (collected) => {
+    if (collected.size === 0) {
+      pendientesImagen.delete(interaction.user.id);
+      await interaction
+        .followUp({
+          content: 'Tiempo agotado. No se recibio ninguna imagen de firma.',
+          flags: MessageFlags.Ephemeral,
+        })
+        .catch(() => {});
+    }
+  });
+}
+
+async function pedirModalTexto(interaction, retorno) {
+  const modal = new ModalBuilder()
+    .setCustomId(`contrato:guardar_texto:${retorno}`)
+    .setTitle('Firma de texto');
+
+  const firma = obtenerFirma(interaction.user.id);
+  modal.addComponents(
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder()
+        .setCustomId('texto')
+        .setLabel('Tu firma (como quieres que aparezca)')
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true)
+        .setMaxLength(60)
+        .setPlaceholder('Ej. F. Ellis')
+        .setValue((firma?.texto || interaction.user.globalName || interaction.user.username || '').slice(0, 60)),
+    ),
+  );
+
+  await interaction.showModal(modal);
 }
 
 async function handle(interaction, accion, args) {
   asegurarTablas();
+  const retorno = args[0] || 'gestionar';
 
-  if (accion === 'guardar_firma') {
-    // args[0] = fundacion:CTR-xxx | miembro:CTR-xxx | solo
-    const retorno = args[0] || 'solo';
+  // --- Crear / guardar texto ---
+  if (accion === 'guardar_texto') {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const texto = sanitizar(interaction.fields.getTextInputValue('texto')).slice(0, 60);
     if (!texto) {
       await interaction.editReply({ content: 'La firma no puede estar vacia.' });
       return;
     }
-
     getDb()
       .prepare(`
-        INSERT INTO firmas_digitales (discord_id, texto, actualizado_en)
-        VALUES (?, ?, datetime('now'))
+        INSERT INTO firmas_digitales (discord_id, texto, tipo_preferido, actualizado_en)
+        VALUES (?, ?, 'texto', datetime('now'))
         ON CONFLICT(discord_id) DO UPDATE SET
           texto = excluded.texto,
+          tipo_preferido = 'texto',
           actualizado_en = datetime('now')
       `)
       .run(interaction.user.id, texto);
 
-    auditoria.registrar(interaction.user.id, 'FIRMA.CREAR', { texto });
+    auditoria.registrar(interaction.user.id, 'FIRMA.TEXTO', { texto });
 
-    // Si venia de un intento de firmar contrato, aplicar de inmediato
     const [lado, contratoId] = String(retorno).split(':');
     if ((lado === 'fundacion' || lado === 'miembro') && contratoId) {
       const row = getDb().prepare('SELECT * FROM contratos WHERE id = ?').get(contratoId);
       if (row) {
         if (lado === 'fundacion' && !puedeFirmarFundacion(interaction)) {
-          await interaction.editReply({
-            embeds: [
-              embedBase({
-                color: COLORES.medicina,
-                titulo: 'Firma digital guardada',
-                descripcion:
-                  `Tu firma **${texto}** quedo registrada.\nNo tienes permiso para firmar por la Fundacion en este contrato.`,
-                footer: 'Contratos',
-              }),
-            ],
-          });
+          await interaction.editReply({ content: `Firma **${texto}** guardada. Sin permiso para firmar Fundacion.` });
           return;
         }
         if (lado === 'miembro' && interaction.user.id !== row.miembro_id && !esAdminDiscord(interaction)) {
-          await interaction.editReply({
-            embeds: [
-              embedBase({
-                color: COLORES.medicina,
-                titulo: 'Firma digital guardada',
-                descripcion: `Tu firma **${texto}** quedo registrada.`,
-                footer: 'Contratos',
-              }),
-            ],
-          });
+          await interaction.editReply({ content: `Firma **${texto}** guardada.` });
           return;
         }
-
+        // aplicar
         const fecha = new Date().toLocaleString('es-PA');
         const payloadFirma = {
+          tipo: 'texto',
           texto,
-          cargo:
-            lado === 'fundacion'
-              ? cargoFirmante(interaction)
-              : `${row.personaje} · ${row.rango}`,
+          imagenUrl: null,
+          cargo: lado === 'fundacion' ? cargoFirmante(interaction) : `${row.personaje} · ${row.rango}`,
           discordId: interaction.user.id,
           fecha,
         };
-        const col =
-          lado === 'fundacion' ? 'firma_fundacion_json' : 'firma_miembro_json';
-        getDb()
-          .prepare(`UPDATE contratos SET ${col} = ? WHERE id = ?`)
-          .run(JSON.stringify(payloadFirma), contratoId);
-
+        const col = lado === 'fundacion' ? 'firma_fundacion_json' : 'firma_miembro_json';
+        getDb().prepare(`UPDATE contratos SET ${col} = ? WHERE id = ?`).run(JSON.stringify(payloadFirma), contratoId);
         auditoria.registrar(
           interaction.user.id,
           lado === 'fundacion' ? 'CONTRATO.FIRMA_FUNDACION' : 'CONTRATO.FIRMA_MIEMBRO',
-          { id: contratoId }
+          { id: contratoId, tipo: 'texto' }
         );
-
-        // Actualizar mensaje original del contrato si existe
         const actualizado = getDb().prepare('SELECT * FROM contratos WHERE id = ?').get(contratoId);
-        if (row.canal_id && row.msg_id) {
-          try {
-            const ch = await interaction.guild.channels.fetch(row.canal_id).catch(() => null);
-            const msg = ch ? await ch.messages.fetch(row.msg_id).catch(() => null) : null;
-            if (msg) {
-              const ff = actualizado.firma_fundacion_json
-                ? JSON.parse(actualizado.firma_fundacion_json)
-                : null;
-              const fm = actualizado.firma_miembro_json
-                ? JSON.parse(actualizado.firma_miembro_json)
-                : null;
-              const completo = !!(ff && fm);
-              if (completo) {
-                getDb()
-                  .prepare("UPDATE contratos SET estado = 'Completo' WHERE id = ?")
-                  .run(contratoId);
-                actualizado.estado = 'Completo';
-              }
-              await msg.edit({
-                content: completo
-                  ? `Contrato **${contratoId}** · <@${row.miembro_id}> · **firmado por ambas partes**`
-                  : `Contrato **${contratoId}** · <@${row.miembro_id}> · firmas pendientes`,
-                embeds: [embedContrato(actualizado)],
-                components: botonesFirma(contratoId, ff, fm),
-              });
-            }
-          } catch (err) {
-            console.error('[contrato msg]', err.message);
-          }
-        }
-
+        await actualizarMensajeContrato(interaction, actualizado);
         await interaction.editReply({
           embeds: [
             embedBase({
               color: COLORES.medicina,
-              titulo: 'Firma creada y aplicada',
-              descripcion:
-                `Firma **${texto}** guardada y aplicada al lado **${lado}** del contrato **${contratoId}**.\nEl documento Word no se modifica.`,
+              titulo: 'Firma de texto aplicada',
+              descripcion: `**${texto}** registrada en el lado **${lado}** del contrato **${contratoId}**.`,
               footer: 'Contratos',
             }),
           ],
@@ -355,9 +565,8 @@ async function handle(interaction, accion, args) {
       embeds: [
         embedBase({
           color: COLORES.medicina,
-          titulo: 'Firma digital guardada',
-          descripcion:
-            `Tu firma **${texto}** quedo registrada.\nLa proxima vez que pulses **Firmar** en un contrato, se usara automaticamente.`,
+          titulo: 'Firma de texto guardada',
+          descripcion: `Tu firma **${texto}** quedo registrada.`,
           footer: 'Contratos',
         }),
       ],
@@ -365,6 +574,37 @@ async function handle(interaction, accion, args) {
     return;
   }
 
+  if (accion === 'firma_texto') {
+    return pedirModalTexto(interaction, retorno);
+  }
+
+  if (accion === 'firma_imagen') {
+    return iniciarSubidaImagen(interaction, retorno);
+  }
+
+  if (accion === 'usar_texto' || accion === 'usar_imagen') {
+    const [lado, contratoId] = String(retorno).split(':');
+    if (!contratoId || (lado !== 'fundacion' && lado !== 'miembro')) {
+      await interaction.reply({ content: 'Contexto de contrato invalido.', flags: MessageFlags.Ephemeral });
+      return;
+    }
+    const row = getDb().prepare('SELECT * FROM contratos WHERE id = ?').get(contratoId);
+    if (!row) {
+      await interaction.reply({ content: 'Contrato no encontrado.', flags: MessageFlags.Ephemeral });
+      return;
+    }
+    if (lado === 'fundacion' && !puedeFirmarFundacion(interaction)) {
+      await interaction.reply({ content: 'Sin permiso para firmar por la Fundacion.', flags: MessageFlags.Ephemeral });
+      return;
+    }
+    if (lado === 'miembro' && interaction.user.id !== row.miembro_id && !esAdminDiscord(interaction)) {
+      await interaction.reply({ content: 'Solo el miembro contratado puede firmar aqui.', flags: MessageFlags.Ephemeral });
+      return;
+    }
+    return aplicarFirmaGuardada(interaction, row, lado, accion === 'usar_imagen' ? 'imagen' : 'texto');
+  }
+
+  // --- Botones del mensaje del contrato ---
   const contratoId = args[0];
   if (!contratoId) {
     await interaction.reply({ content: 'Contrato no encontrado.', flags: MessageFlags.Ephemeral }).catch(() => {});
@@ -386,13 +626,10 @@ async function handle(interaction, accion, args) {
       return;
     }
     if (row.firma_fundacion_json) {
-      await interaction.reply({
-        content: 'La Fundacion ya firmo este contrato.',
-        flags: MessageFlags.Ephemeral,
-      });
+      await interaction.reply({ content: 'La Fundacion ya firmo este contrato.', flags: MessageFlags.Ephemeral });
       return;
     }
-    return aplicarFirma(interaction, row, 'fundacion');
+    return menuFirma(interaction, `fundacion:${contratoId}`);
   }
 
   if (accion === 'firmar_miembro') {
@@ -404,13 +641,10 @@ async function handle(interaction, accion, args) {
       return;
     }
     if (row.firma_miembro_json) {
-      await interaction.reply({
-        content: 'El miembro ya firmo este contrato.',
-        flags: MessageFlags.Ephemeral,
-      });
+      await interaction.reply({ content: 'El miembro ya firmo este contrato.', flags: MessageFlags.Ephemeral });
       return;
     }
-    return aplicarFirma(interaction, row, 'miembro');
+    return menuFirma(interaction, `miembro:${contratoId}`);
   }
 
   await interaction.reply({ content: 'Accion no reconocida.', flags: MessageFlags.Ephemeral }).catch(() => {});
