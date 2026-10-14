@@ -15,11 +15,7 @@ const { cargosMapeados, esAdminDiscord } = require('../services/acceso');
 const { embedBase, COLORES } = require('../utils/plantillas');
 const { sanitizar } = require('../utils/helpers');
 
-const CARGOS_EMISORES = [
-  'ST.FUNDADOR',
-  'ST.CO_CALIDAD',
-  'ST.CO_ESTRATEGIA',
-];
+const CARGOS_EMISORES = ['ST.FUNDADOR', 'ST.CO_CALIDAD', 'ST.CO_ESTRATEGIA'];
 
 function puedeEmitir(interaction) {
   if (esAdminDiscord(interaction)) return true;
@@ -43,27 +39,35 @@ function asegurarTabla() {
       firma_miembro_json TEXT,
       estado TEXT DEFAULT 'Pendiente',
       creado_en TEXT DEFAULT (datetime('now'))
-    )
+    );
+    CREATE TABLE IF NOT EXISTS firmas_digitales (
+      discord_id TEXT PRIMARY KEY,
+      texto TEXT NOT NULL,
+      cargo_etiqueta TEXT,
+      creado_en TEXT DEFAULT (datetime('now')),
+      actualizado_en TEXT DEFAULT (datetime('now'))
+    );
   `);
 }
 
 function botonesFirma(contratoId, firmaFund, firmaMiembro) {
-  const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId(`contrato:firmar_fundacion:${contratoId}`)
-      .setLabel(firmaFund ? 'Fundacion firmada' : 'Firmar · Fundacion')
-      .setStyle(firmaFund ? ButtonStyle.Secondary : ButtonStyle.Success)
-      .setDisabled(!!firmaFund),
-    new ButtonBuilder()
-      .setCustomId(`contrato:firmar_miembro:${contratoId}`)
-      .setLabel(firmaMiembro ? 'Miembro firmado' : 'Firmar · Miembro')
-      .setStyle(firmaMiembro ? ButtonStyle.Secondary : ButtonStyle.Primary)
-      .setDisabled(!!firmaMiembro),
-  );
-  return [row];
+  return [
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`contrato:firmar_fundacion:${contratoId}`)
+        .setLabel(firmaFund ? 'Fundacion firmada' : 'Firmar · Fundacion')
+        .setStyle(firmaFund ? ButtonStyle.Secondary : ButtonStyle.Success)
+        .setDisabled(!!firmaFund),
+      new ButtonBuilder()
+        .setCustomId(`contrato:firmar_miembro:${contratoId}`)
+        .setLabel(firmaMiembro ? 'Miembro firmado' : 'Firmar · Miembro')
+        .setStyle(firmaMiembro ? ButtonStyle.Secondary : ButtonStyle.Primary)
+        .setDisabled(!!firmaMiembro),
+    ),
+  ];
 }
 
-function embedContrato(row, extras = {}) {
+function embedContrato(row) {
   const ff = row.firma_fundacion_json ? JSON.parse(row.firma_fundacion_json) : null;
   const fm = row.firma_miembro_json ? JSON.parse(row.firma_miembro_json) : null;
   return embedBase({
@@ -71,8 +75,9 @@ function embedContrato(row, extras = {}) {
     author: true,
     titulo: `Contrato de Ingreso · ${row.id}`,
     descripcion:
-      'Documento oficial de la Fundacion. Cada parte firma con el boton de su lado.\n' +
-      '**Izquierda:** Fundador o Cofundador · **Derecha:** el miembro contratado.',
+      'Documento Word adjunto (no se modifica).\n' +
+      'Las firmas digitales se registran con los botones.\n' +
+      'Si no tienes firma digital, el bot te pedira crearla al firmar.',
     campos: [
       { name: 'Miembro', value: `<@${row.miembro_id}>`, inline: true },
       { name: 'Personaje', value: row.personaje, inline: true },
@@ -81,17 +86,17 @@ function embedContrato(row, extras = {}) {
       { name: 'Estado', value: row.estado, inline: true },
       { name: 'Emitido por', value: row.emitido_por || '—', inline: true },
       {
-        name: 'Firma Fundacion',
+        name: 'Firma digital · Fundacion',
         value: ff
-          ? `**${ff.nombre}**\n${ff.cargo || ''}\n_${ff.fecha}_`
-          : '_Pendiente · solo Fundador / Cofundador_',
+          ? `✍️ **${ff.texto || ff.nombre}**\n${ff.cargo || ''}\n_${ff.fecha}_`
+          : '_Pendiente · Fundador / Cofundador_',
         inline: true,
       },
       {
-        name: 'Firma Miembro',
+        name: 'Firma digital · Miembro',
         value: fm
-          ? `**${fm.nombre}**\n_${fm.fecha}_`
-          : `_Pendiente · solo <@${row.miembro_id}>_`,
+          ? `✍️ **${fm.texto || fm.nombre}**\n_${fm.fecha}_`
+          : `_Pendiente · <@${row.miembro_id}>_`,
         inline: true,
       },
     ],
@@ -103,7 +108,7 @@ module.exports = {
   data: new SlashCommandBuilder()
     .setName('contrato')
     .setDescription(
-      'Emite Contrato de Ingreso Word · Solo Fundador y Cofundadores · Firmas por boton'
+      'Emite Contrato de Ingreso · Solo Fundador y Cofundadores · Firmas digitales por boton'
     )
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles)
     .addUserOption((o) =>
@@ -187,7 +192,6 @@ module.exports = {
       name: `Contrato_${id}_${personaje.replace(/\s+/g, '_')}.docx`,
     });
 
-    let msgId = null;
     if (destId) {
       const ch = await interaction.guild.channels.fetch(destId).catch(() => null);
       if (ch?.isTextBased()) {
@@ -197,10 +201,9 @@ module.exports = {
           components: botonesFirma(id, null, null),
           files: [attachment],
         });
-        msgId = msg.id;
         getDb()
           .prepare('UPDATE contratos SET canal_id = ?, msg_id = ? WHERE id = ?')
-          .run(destId, msgId, id);
+          .run(destId, msg.id, id);
       }
     }
 
@@ -218,8 +221,11 @@ module.exports = {
           author: true,
           titulo: 'Contrato emitido',
           descripcion: destId
-            ? `Publicado en <#${destId}>.\n\n**Firmar · Fundacion:** Fundador o Cofundador\n**Firmar · Miembro:** <@${user.id}>`
-            : 'Configura canal de fichas/logs o indica `canal`. Se adjunto el borrador aqui.',
+            ? `Publicado en <#${destId}>.\n\n` +
+              '**Firmar · Fundacion:** Fundador o Cofundador\n' +
+              `**Firmar · Miembro:** <@${user.id}>\n\n` +
+              'Si alguien no tiene firma digital, al pulsar Firmar el bot le pedira crearla. El Word no se edita.'
+            : 'Configura canal de fichas/logs o indica `canal`.',
           campos: [
             { name: 'ID', value: id, inline: true },
             { name: 'Miembro', value: `<@${user.id}>`, inline: true },
