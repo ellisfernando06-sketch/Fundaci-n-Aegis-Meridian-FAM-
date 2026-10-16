@@ -8,13 +8,40 @@ const {
 const { getDb } = require('../db');
 const auditoria = require('../services/auditoria');
 const { embedBase, COLORES } = require('../utils/plantillas');
-const { getJerarquiaCompleta } = require('../data/organigrama');
+const { getJerarquiaCompleta, nombreBaseRol } = require('../data/organigrama');
+const { normalizarNombre } = require('../utils/helpers');
 
 function esAdmin(interaction) {
   return (
     interaction.memberPermissions?.has(PermissionFlagsBits.Administrator) ||
     interaction.member?.permissions?.has(PermissionFlagsBits.Administrator)
   );
+}
+
+function nombreOficial(item) {
+  return item.nombreRol || item.nombre || item.key || '';
+}
+
+function matchRolAItem(rolDiscord, item) {
+  const oficial = normalizarNombre(nombreOficial(item));
+  const nom = normalizarNombre(rolDiscord.name);
+  const base = normalizarNombre(nombreBaseRol(rolDiscord.name));
+  if (!oficial) return false;
+  if (nom === oficial) return true;
+  if (base === oficial) return true;
+  if (item.nombre && base === normalizarNombre(item.nombre)) return true;
+  const tokens = normalizarNombre(item.nombre || '').split(/\s+/).filter((t) => t.length > 3);
+  if (tokens.length >= 2 && tokens.every((t) => nom.includes(t) || base.includes(t))) return true;
+  return false;
+}
+
+function guardarMapa(cargoKey, roleId, nombreRol) {
+  try {
+    getDb().prepare(
+      `INSERT INTO roles_map (cargo_key, role_id, nombre_rol) VALUES (?, ?, ?)
+       ON CONFLICT(cargo_key) DO UPDATE SET role_id = excluded.role_id, nombre_rol = excluded.nombre_rol, actualizado_en = datetime('now')`
+    ).run(cargoKey, roleId, nombreRol);
+  } catch (_) {}
 }
 
 async function onColoresConfirmar(interaction) {
@@ -31,16 +58,16 @@ async function onColoresConfirmar(interaction) {
     return;
   }
 
-  const jerarquia = getJerarquiaCompleta().filter((i) => i.tipo !== 'separador');
+  const jerarquia = getJerarquiaCompleta().filter((i) => i.tipo !== 'separador' && i.key);
   await interaction.update({
     embeds: [embedBase({
       color: COLORES.neutral,
       titulo: 'Aplicar colores unificados',
       descripcion:
-        'Actualiza el color de **todos** los roles del organigrama ya mapeados.\n' +
-        '· **Director / mando alto**: tono mas oscuro de la faccion\n' +
+        'Lee **todos** los roles del servidor, los empareja con el organigrama por **nombre** y aplica color por faccion.\n' +
+        '· **Director / mando alto**: tono mas oscuro\n' +
         '· **Resto de la faccion**: mismo color, mas claro\n\n' +
-        `Roles a sincronizar (aprox.): **${jerarquia.length}**`,
+        `Cargos del organigrama: **${jerarquia.length}**`,
       footer: 'Administracion · Colores por faccion',
     })],
     components: [
@@ -66,20 +93,44 @@ async function onColoresEjecutar(interaction) {
   const me = guild.members.me;
   const botPos = me?.roles?.highest?.position ?? 0;
 
-  const jerarquia = getJerarquiaCompleta();
+  const rolesServidor = [...guild.roles.cache.values()].filter(
+    (r) => r.id !== guild.id && !r.managed
+  );
+  const jerarquia = getJerarquiaCompleta().filter((i) => i.tipo !== 'separador' && i.key);
+
   let actualizados = 0;
   let omitidos = 0;
+  let detectados = 0;
   const errores = [];
+  const usados = new Set();
 
   for (const item of jerarquia) {
-    if (!item.key) continue;
-    const row = getDb().prepare('SELECT role_id FROM roles_map WHERE cargo_key = ?').get(item.key);
-    if (!row?.role_id) {
+    let rol = null;
+    try {
+      const row = getDb().prepare('SELECT role_id FROM roles_map WHERE cargo_key = ?').get(item.key);
+      if (row?.role_id) {
+        const r = guild.roles.cache.get(row.role_id);
+        if (r && !usados.has(r.id)) rol = r;
+      }
+    } catch (_) {}
+    if (!rol) {
+      for (const r of rolesServidor) {
+        if (usados.has(r.id)) continue;
+        if (matchRolAItem(r, item)) {
+          rol = r;
+          break;
+        }
+      }
+    }
+    if (!rol) {
       omitidos += 1;
       continue;
     }
-    const rol = guild.roles.cache.get(row.role_id);
-    if (!rol || !rol.editable || rol.position >= botPos) {
+    detectados += 1;
+    usados.add(rol.id);
+    guardarMapa(item.key, rol.id, rol.name);
+
+    if (!rol.editable || rol.position >= botPos) {
       omitidos += 1;
       continue;
     }
@@ -106,6 +157,7 @@ async function onColoresEjecutar(interaction) {
   auditoria.registrar(interaction.user.id, 'CONFIG_ROLES.COLORES', {
     actualizados,
     omitidos,
+    detectados,
     errores: errores.length,
   });
 
@@ -114,8 +166,9 @@ async function onColoresEjecutar(interaction) {
       color: COLORES.medicina,
       titulo: 'Colores aplicados',
       descripcion: [
+        `Roles detectados por nombre/mapa: **${detectados}**`,
         `Actualizados: **${actualizados}**`,
-        `Omitidos (sin mapa / sin permiso / igual): **${omitidos}**`,
+        `Omitidos (sin match / sin permiso / igual): **${omitidos}**`,
         errores.length ? `Errores: **${errores.length}**` : null,
         '',
         'Directores: tono mas oscuro · faccion: mismo color mas claro.',
