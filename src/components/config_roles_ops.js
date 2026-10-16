@@ -43,7 +43,6 @@ function nombreOficial(item) {
   return item.nombreRol || item.nombre || item.key;
 }
 
-/** Clave de texto del separador (FUNDACION, MODERACION, etc.) */
 function claveSeparador(texto) {
   const t = String(texto || '')
     .normalize('NFD')
@@ -54,7 +53,7 @@ function claveSeparador(texto) {
   if (t.includes('SOPORTE')) return 'SOPORTE';
   if (t.includes('CUPULA')) return 'CUPULA';
   if (t.includes('DIRECCION')) return 'DIRECCIONES';
-  if (t.includes('SEGURIDAD INTERNA') || t.includes('SI ')) return 'SI';
+  if (t.includes('SEGURIDAD INTERNA')) return 'SI';
   if (t.includes('FACCION SEGURIDAD') || (t.includes('SEGURIDAD') && !t.includes('INTERNA'))) return 'SEG';
   if (t.includes('MEDICINA')) return 'MED';
   if (t.includes('INVESTIGACION')) return 'INV';
@@ -77,7 +76,6 @@ function existeExacto(rolDiscord, item) {
     const c1 = claveSeparador(rolDiscord.name);
     const c2 = claveSeparador(nombreOficial(item));
     if (c1 && c2 && c1 === c2) return true;
-    // barra + titulo parcial
     if (/[━─═]/.test(rolDiscord.name) && c2 && String(rolDiscord.name).toUpperCase().includes(c2.slice(0, 4))) {
       return true;
     }
@@ -87,8 +85,7 @@ function existeExacto(rolDiscord, item) {
   if (nom === oficial) return true;
   if (item.nombre && base === normalizarNombre(item.nombre)) return true;
   if (item.nombre && nom.includes(normalizarNombre(item.nombre))) return true;
-  const aliases = item.aliases || [];
-  for (const a of aliases) {
+  for (const a of item.aliases || []) {
     const na = normalizarNombre(a);
     if (na && (nom === na || base === na || nom.includes(na))) return true;
   }
@@ -96,9 +93,7 @@ function existeExacto(rolDiscord, item) {
 }
 
 function escanear(guild) {
-  const roles = [...guild.roles.cache.values()].filter(
-    (r) => r.id !== guild.id && !r.managed
-  );
+  const roles = [...guild.roles.cache.values()].filter((r) => r.id !== guild.id && !r.managed);
   const catalogo = getJerarquiaCompleta();
   const usados = new Set();
   const detectados = [];
@@ -120,12 +115,7 @@ function escanear(guild) {
       guardarMapa(item.key, match.id, match.name, 'existente');
       const destino = String(nombreOficial(item)).slice(0, 100);
       if (match.name !== destino) {
-        aRenombrar.push({
-          item,
-          rol: match,
-          nombreActual: match.name,
-          nombreDestino: destino,
-        });
+        aRenombrar.push({ item, rol: match, nombreActual: match.name, nombreDestino: destino });
       }
     } else {
       faltantes.push(item);
@@ -184,29 +174,8 @@ async function analizar(interaction) {
       embedBase({
         color: COLORES.denegado,
         titulo: `Faltantes (${faltantes.length})`,
-        descripcion: truncar(
-          faltantes
-            .slice(0, 30)
-            .map((f) => `· ${nombreOficial(f)}`)
-            .join('\n')
-        ),
+        descripcion: truncar(faltantes.slice(0, 30).map((f) => `· ${nombreOficial(f)}`).join('\n')),
         footer: 'Usa Crear roles (incluye separadores)',
-        timestamp: false,
-      })
-    );
-  }
-  if (aRenombrar.length) {
-    embeds.push(
-      embedBase({
-        color: 0xe8b923,
-        titulo: `Por renombrar (${aRenombrar.length})`,
-        descripcion: truncar(
-          aRenombrar
-            .slice(0, 20)
-            .map((r) => `**${r.nombreActual}** → \`${r.nombreDestino}\``)
-            .join('\n')
-        ),
-        footer: 'Usa Renombrar',
         timestamp: false,
       })
     );
@@ -214,7 +183,6 @@ async function analizar(interaction) {
   auditoria.registrar(interaction.user.id, 'CONFIG_ROLES.ANALIZAR', {
     detectados: detectados.length,
     faltantes: faltantes.length,
-    separadores: seps.length,
   });
   await interaction.editReply({ embeds, components: [] });
 }
@@ -224,20 +192,13 @@ async function onCrearConfirmar(interaction) {
   await interaction.guild.roles.fetch();
   const { faltantes } = escanear(interaction.guild);
   const seps = faltantes.filter((f) => f.tipo === 'separador' || String(f.key || '').startsWith('SEP.'));
-  const cargos = faltantes.filter((f) => !(f.tipo === 'separador' || String(f.key || '').startsWith('SEP.')));
-  const preview = faltantes
-    .slice(0, 28)
-    .map((f) => `· ${nombreOficial(f)}`)
-    .join('\n') || 'Nada pendiente.';
+  const preview = faltantes.slice(0, 28).map((f) => `· ${nombreOficial(f)}`).join('\n') || 'Nada pendiente.';
   await interaction.editReply({
     embeds: [
       embedBase({
         color: COLORES.neutral,
         titulo: 'Crear roles y separadores',
-        descripcion:
-          `Separadores a crear: **${seps.length}**\n` +
-          `Cargos/permisos/areas/llaves: **${cargos.length}**\n\n` +
-          `${preview}${faltantes.length > 28 ? `\n… +${faltantes.length - 28}` : ''}`,
+        descripcion: `Faltantes: **${faltantes.length}** (separadores: **${seps.length}**)\n\n${preview}`,
         footer: 'Administracion',
       }),
     ],
@@ -261,8 +222,6 @@ async function onCrearEjecutar(interaction) {
   let creados = 0;
   let sepsCreados = 0;
   const fallos = [];
-
-  // Primero separadores, luego el resto (mismo orden del catalogo)
   const ordenados = [...faltantes].sort((a, b) => (a.orden || 0) - (b.orden || 0));
 
   for (const item of ordenados) {
@@ -275,14 +234,14 @@ async function onCrearEjecutar(interaction) {
       const rol = await guild.roles.create({
         name,
         colors: Number.isFinite(color) ? color : 0x1a1a1e,
-        reason: `Aegis · crear ${esSep ? 'separador' : 'rol'} · ${interaction.user.tag}`,
+        reason: `Aegis · crear · ${interaction.user.tag}`,
         mentionable: false,
         hoist: false,
       });
       guardarMapa(item.key, rol.id, rol.name, 'creado');
       creados += 1;
       if (esSep) sepsCreados += 1;
-      await new Promise((r) => setTimeout(r, 400));
+      await new Promise((r) => setTimeout(r, 250));
     } catch (e) {
       fallos.push(name);
       console.error('[Crear]', name, e.message || e);
@@ -292,25 +251,18 @@ async function onCrearEjecutar(interaction) {
   let ordenInfo = '';
   try {
     const r = await ordenarRoles(guild, interaction.user.tag);
-    ordenInfo = `\nOrdenados: **${r.movidos}** (separadores: **${r.separadores}**)`;
+    ordenInfo = `\nOrdenados en lote: **${r.movidos}**`;
   } catch (e) {
     console.error('[Orden post-crear]', e);
   }
 
-  auditoria.registrar(interaction.user.id, 'CONFIG_ROLES.CREAR', {
-    creados,
-    sepsCreados,
-    fallos: fallos.length,
-  });
+  auditoria.registrar(interaction.user.id, 'CONFIG_ROLES.CREAR', { creados, sepsCreados });
   await interaction.editReply({
     embeds: [
       embedBase({
         color: COLORES.medicina,
         titulo: 'Creacion completada',
-        descripcion:
-          `Creados: **${creados}** (separadores: **${sepsCreados}**)` +
-          (fallos.length ? `\nFallos: ${fallos.length}` : '') +
-          ordenInfo,
+        descripcion: `Creados: **${creados}** (separadores: **${sepsCreados}**)${fallos.length ? `\nFallos: ${fallos.length}` : ''}${ordenInfo}`,
         footer: 'Administracion',
       }),
     ],
@@ -323,16 +275,13 @@ async function onRenombrarConfirmar(interaction) {
   await interaction.guild.roles.fetch();
   const { aRenombrar } = escanear(interaction.guild);
   const preview =
-    aRenombrar
-      .slice(0, 20)
-      .map((r) => `**${r.nombreActual}** → \`${r.nombreDestino}\``)
-      .join('\n') || 'Nada pendiente.';
+    aRenombrar.slice(0, 20).map((r) => `**${r.nombreActual}** → \`${r.nombreDestino}\``).join('\n') || 'Nada pendiente.';
   await interaction.editReply({
     embeds: [
       embedBase({
         color: COLORES.neutral,
         titulo: 'Renombrar roles',
-        descripcion: preview + (aRenombrar.length > 20 ? `\n… +${aRenombrar.length - 20}` : ''),
+        descripcion: preview,
         footer: 'Administracion',
       }),
     ],
@@ -359,21 +308,14 @@ async function onRenombrarEjecutar(interaction) {
       await r.rol.setName(r.nombreDestino.slice(0, 100), `Aegis · renombrar · ${interaction.user.tag}`);
       guardarMapa(r.item.key, r.rol.id, r.nombreDestino, 'existente');
       n += 1;
-      await new Promise((x) => setTimeout(x, 350));
+      await new Promise((x) => setTimeout(x, 200));
     } catch (e) {
       console.error('[Renombrar]', e.message || e);
     }
   }
   auditoria.registrar(interaction.user.id, 'CONFIG_ROLES.RENOMBRAR', { n });
   await interaction.editReply({
-    embeds: [
-      embedBase({
-        color: COLORES.medicina,
-        titulo: 'Renombrado completado',
-        descripcion: `Roles renombrados: **${n}**`,
-        footer: 'Administracion',
-      }),
-    ],
+    embeds: [embedBase({ color: COLORES.medicina, titulo: 'Renombrado', descripcion: `**${n}** roles`, footer: 'Administracion' })],
     components: [],
   });
 }
@@ -384,9 +326,9 @@ async function onOrganizarConfirmar(interaction) {
     embeds: [
       embedBase({
         color: COLORES.neutral,
-        titulo: 'Ordenar roles',
+        titulo: 'Ordenar roles (rapido)',
         descripcion:
-          'Reordena **separadores + cargos** segun el organigrama.\n' +
+          'Reordena **separadores + cargos** en un solo lote.\n' +
           'Arriba: FUNDACION · abajo: LLAVES.\n' +
           'El rol del bot debe estar por encima de todos.',
         footer: 'Administracion',
@@ -404,9 +346,9 @@ async function onOrganizarConfirmar(interaction) {
 }
 
 /**
- * Discord: position mas alta = mas arriba en la lista.
- * orden organigrama bajo (10 FUNDACION) = position alta.
- * Incluye separadores SEP.*
+ * Orden RAPIDO: un solo guild.roles.setPositions (API bulk).
+ * Discord: position alta = arriba en la lista.
+ * orden organigrama bajo (SEP.FUNDACION=10) => position alta.
  */
 async function ordenarRoles(guild, tag) {
   await guild.roles.fetch();
@@ -415,30 +357,44 @@ async function ordenarRoles(guild, tag) {
   const botPos = me?.roles?.highest?.position ?? 0;
 
   const ordenados = detectados
-    .filter((d) => d.item.orden != null && d.rol.editable && d.rol.position < botPos)
+    .filter((d) => d.item.orden != null && d.rol && d.rol.editable && d.rol.position < botPos && !d.rol.managed)
     .sort((a, b) => (a.item.orden || 0) - (b.item.orden || 0));
 
-  // De arriba hacia abajo: primer item (SEP.FUNDACION) recibe la position mas alta
+  // Position objetivo: el primero del organigrama queda justo debajo del bot
   let pos = botPos - 1;
-  let movidos = 0;
+  const positions = [];
   let separadores = 0;
-  let fallos = 0;
 
   for (const d of ordenados) {
     if (pos < 1) break;
-    const esSep = d.item.tipo === 'separador' || String(d.item.key || '').startsWith('SEP.');
+    positions.push({ role: d.rol.id, position: pos });
+    if (d.item.tipo === 'separador' || String(d.item.key || '').startsWith('SEP.')) separadores += 1;
+    pos -= 1;
+  }
+
+  let movidos = 0;
+  let fallos = 0;
+
+  // Lotes de 50 (limite practico Discord)
+  for (let i = 0; i < positions.length; i += 50) {
+    const chunk = positions.slice(i, i + 50);
     try {
-      if (d.rol.position !== pos) {
-        await d.rol.setPosition(pos, { reason: `Aegis · orden · ${tag}` });
-        movidos += 1;
-        if (esSep) separadores += 1;
-        await new Promise((r) => setTimeout(r, 400));
-      }
-      pos -= 1;
+      await guild.roles.setPositions(chunk);
+      movidos += chunk.length;
     } catch (e) {
-      fallos += 1;
-      console.error('[Orden]', d.rol.name, e.message || e);
-      pos -= 1;
+      console.error('[Orden bulk]', e.message || e);
+      // Fallback: uno a uno sin delay largo
+      for (const p of chunk) {
+        try {
+          const rol = guild.roles.cache.get(p.role);
+          if (rol) {
+            await rol.setPosition(p.position, { reason: `Aegis · orden · ${tag}` });
+            movidos += 1;
+          }
+        } catch (e2) {
+          fallos += 1;
+        }
+      }
     }
   }
 
@@ -457,21 +413,22 @@ async function onOrganizarEjecutar(interaction) {
   await interaction.editReply({
     embeds: [
       embedBase({
-        color: COLORES.medicina,
+        color: info.movidos > 0 ? COLORES.medicina : COLORES.denegado,
         titulo: 'Orden aplicado',
         descripcion: [
-          `Roles en cadena organigrama: **${info.total}**`,
-          `Movidos: **${info.movidos}**`,
-          `Separadores recolocados: **${info.separadores}**`,
+          `Cadena organigrama: **${info.total}**`,
+          `Movidos (lote rapido): **${info.movidos}**`,
+          `Separadores: **${info.separadores}**`,
           info.fallos ? `Fallos: **${info.fallos}**` : null,
           `Posicion del bot: **${info.botPos}**`,
           '',
-          'Orden visual: FUNDACION (arriba) → … → LLAVES (abajo).',
-          'Si falla mucho: sube el rol del bot por encima de todos.',
+          info.movidos === 0
+            ? '**0 movidos:** sube el rol del bot por encima de todos y vuelve a intentar.'
+            : 'FUNDACION arriba → LLAVES abajo.',
         ]
           .filter(Boolean)
           .join('\n'),
-        footer: 'Administracion',
+        footer: 'Administracion · orden bulk',
       }),
     ],
     components: [],
@@ -485,7 +442,7 @@ async function onEliminarConfirmar(interaction) {
       embedBase({
         color: COLORES.denegado,
         titulo: 'Eliminar roles del bot',
-        descripcion: 'Elimina roles creados por el bot (origen=creado). Los roles preexistentes se conservan.',
+        descripcion: 'Elimina roles con origen=creado.',
         footer: 'Administracion',
       }),
     ],
@@ -505,32 +462,19 @@ async function onEliminarEjecutar(interaction) {
   asegurarColumnaOrigen();
   const rows = getDb().prepare(`SELECT * FROM roles_map WHERE origen = 'creado'`).all();
   let eliminados = 0;
-  const fallos = [];
   for (const row of rows) {
     const rol = interaction.guild.roles.cache.get(row.role_id);
-    if (!rol || !rol.editable) {
-      fallos.push(row.nombre_rol || row.cargo_key);
-      continue;
-    }
+    if (!rol || !rol.editable) continue;
     try {
       await rol.delete(`Aegis · eliminar · ${interaction.user.tag}`);
       getDb().prepare('DELETE FROM roles_map WHERE cargo_key = ?').run(row.cargo_key);
       eliminados += 1;
-      await new Promise((r) => setTimeout(r, 350));
-    } catch (e) {
-      fallos.push(row.nombre_rol || row.cargo_key);
-    }
+      await new Promise((r) => setTimeout(r, 200));
+    } catch (_) {}
   }
   auditoria.registrar(interaction.user.id, 'CONFIG_ROLES.ELIMINAR', { eliminados });
   await interaction.editReply({
-    embeds: [
-      embedBase({
-        color: COLORES.medicina,
-        titulo: 'Eliminacion completada',
-        descripcion: `Eliminados: **${eliminados}**${fallos.length ? `\nFallos: ${fallos.length}` : ''}`,
-        footer: 'Administracion',
-      }),
-    ],
+    embeds: [embedBase({ color: COLORES.medicina, titulo: 'Eliminacion', descripcion: `**${eliminados}**`, footer: 'Administracion' })],
     components: [],
   });
 }
