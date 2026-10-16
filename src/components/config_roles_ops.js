@@ -13,7 +13,7 @@ const {
   getOrganigramaTexto,
   nombreBaseRol,
 } = require('../data/organigrama');
-const { normalizarNombre, truncar } = require('../utils/helpers');
+const { normalizarNombre, truncar, similitudDice } = require('../utils/helpers');
 
 function esAdmin(interaction) {
   return (
@@ -76,19 +76,31 @@ function existeExacto(rolDiscord, item) {
     const c1 = claveSeparador(rolDiscord.name);
     const c2 = claveSeparador(nombreOficial(item));
     if (c1 && c2 && c1 === c2) return true;
-    if (/[━─═]/.test(rolDiscord.name) && c2 && String(rolDiscord.name).toUpperCase().includes(c2.slice(0, 4))) {
-      return true;
+    if (/[━─═\-_]{3,}/.test(rolDiscord.name) && c2) {
+      const raw = String(rolDiscord.name).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+      if (raw.includes(c2) || raw.includes(c2.slice(0, 5))) return true;
     }
     return false;
   }
 
-  if (nom === oficial) return true;
-  if (item.nombre && base === normalizarNombre(item.nombre)) return true;
-  if (item.nombre && nom.includes(normalizarNombre(item.nombre))) return true;
+  if (nom === oficial || base === oficial) return true;
+  if (item.nombre) {
+    const nn = normalizarNombre(item.nombre);
+    if (base === nn || nom === nn) return true;
+    if (nn.length >= 6 && (nom.includes(nn) || base.includes(nn))) return true;
+  }
+  if (item.key) {
+    const k = normalizarNombre(String(item.key).replace(/\./g, ' '));
+    if (k.length >= 4 && (nom.includes(k) || base.includes(k))) return true;
+  }
   for (const a of item.aliases || []) {
     const na = normalizarNombre(a);
-    if (na && (nom === na || base === na || nom.includes(na))) return true;
+    if (na && (nom === na || base === na)) return true;
+    if (na && na.length >= 5 && (nom.includes(na) || base.includes(na))) return true;
   }
+  // fuzzy ultimo recurso
+  if (oficial.length >= 8 && similitudDice(oficial, nom) >= 0.82) return true;
+  if (item.nombre && similitudDice(item.nombre, base) >= 0.85) return true;
   return false;
 }
 
@@ -100,13 +112,27 @@ function escanear(guild) {
   const faltantes = [];
   const aRenombrar = [];
 
+  // 1) roles_map primero
+  let mapaRows = [];
+  try {
+    mapaRows = getDb().prepare('SELECT cargo_key, role_id, nombre_rol FROM roles_map').all();
+  } catch (_) {}
+  const mapaPorKey = Object.fromEntries(mapaRows.map((r) => [r.cargo_key, r]));
+
   for (const item of catalogo) {
     let match = null;
-    for (const rol of roles) {
-      if (usados.has(rol.id)) continue;
-      if (existeExacto(rol, item)) {
-        match = rol;
-        break;
+    const row = mapaPorKey[item.key];
+    if (row?.role_id) {
+      const r = guild.roles.cache.get(row.role_id);
+      if (r && !usados.has(r.id) && !r.managed) match = r;
+    }
+    if (!match) {
+      for (const rol of roles) {
+        if (usados.has(rol.id)) continue;
+        if (existeExacto(rol, item)) {
+          match = rol;
+          break;
+        }
       }
     }
     if (match) {
@@ -175,7 +201,7 @@ async function analizar(interaction) {
         color: COLORES.denegado,
         titulo: `Faltantes (${faltantes.length})`,
         descripcion: truncar(faltantes.slice(0, 30).map((f) => `· ${nombreOficial(f)}`).join('\n')),
-        footer: 'Usa Crear roles (incluye separadores)',
+        footer: 'Usa Crear roles',
         timestamp: false,
       })
     );
@@ -241,7 +267,7 @@ async function onCrearEjecutar(interaction) {
       guardarMapa(item.key, rol.id, rol.name, 'creado');
       creados += 1;
       if (esSep) sepsCreados += 1;
-      await new Promise((r) => setTimeout(r, 250));
+      await new Promise((r) => setTimeout(r, 200));
     } catch (e) {
       fallos.push(name);
       console.error('[Crear]', name, e.message || e);
@@ -251,7 +277,7 @@ async function onCrearEjecutar(interaction) {
   let ordenInfo = '';
   try {
     const r = await ordenarRoles(guild, interaction.user.tag);
-    ordenInfo = `\nOrdenados en lote: **${r.movidos}**`;
+    ordenInfo = `\nOrdenados: **${r.movidos}**`;
   } catch (e) {
     console.error('[Orden post-crear]', e);
   }
@@ -262,7 +288,7 @@ async function onCrearEjecutar(interaction) {
       embedBase({
         color: COLORES.medicina,
         titulo: 'Creacion completada',
-        descripcion: `Creados: **${creados}** (separadores: **${sepsCreados}**)${fallos.length ? `\nFallos: ${fallos.length}` : ''}${ordenInfo}`,
+        descripcion: `Creados: **${creados}** (seps: **${sepsCreados}**)${fallos.length ? `\nFallos: ${fallos.length}` : ''}${ordenInfo}`,
         footer: 'Administracion',
       }),
     ],
@@ -308,7 +334,7 @@ async function onRenombrarEjecutar(interaction) {
       await r.rol.setName(r.nombreDestino.slice(0, 100), `Aegis · renombrar · ${interaction.user.tag}`);
       guardarMapa(r.item.key, r.rol.id, r.nombreDestino, 'existente');
       n += 1;
-      await new Promise((x) => setTimeout(x, 200));
+      await new Promise((x) => setTimeout(x, 150));
     } catch (e) {
       console.error('[Renombrar]', e.message || e);
     }
@@ -322,15 +348,19 @@ async function onRenombrarEjecutar(interaction) {
 
 async function onOrganizarConfirmar(interaction) {
   await interaction.deferUpdate();
+  await interaction.guild.roles.fetch().catch(() => {});
+  const { detectados } = escanear(interaction.guild);
+  const botPos = interaction.guild.members.me?.roles?.highest?.position ?? 0;
+  const editables = detectados.filter((d) => d.rol.editable && d.rol.position < botPos).length;
   await interaction.editReply({
     embeds: [
       embedBase({
         color: COLORES.neutral,
-        titulo: 'Ordenar roles (rapido)',
+        titulo: 'Ordenar roles',
         descripcion:
-          'Reordena **separadores + cargos** en un solo lote.\n' +
-          'Arriba: FUNDACION · abajo: LLAVES.\n' +
-          'El rol del bot debe estar por encima de todos.',
+          `Detectados: **${detectados.length}** · Editables bajo el bot: **${editables}**\n` +
+          `Posicion del bot: **${botPos}**\n\n` +
+          'Al confirmar se reordenan **en un lote** (FUNDACION arriba → LLAVES abajo, con separadores).',
         footer: 'Administracion',
       }),
     ],
@@ -339,96 +369,159 @@ async function onOrganizarConfirmar(interaction) {
         new ButtonBuilder()
           .setCustomId(`config_roles:organizar_ejecutar:${interaction.user.id}`)
           .setLabel('Ordenar ahora')
-          .setStyle(ButtonStyle.Primary)
+          .setStyle(ButtonStyle.Success)
       ),
     ],
   });
 }
 
 /**
- * Orden RAPIDO: un solo guild.roles.setPositions (API bulk).
- * Discord: position alta = arriba en la lista.
- * orden organigrama bajo (SEP.FUNDACION=10) => position alta.
+ * Orden FORZADO y RAPIDO.
+ * 1) setPositions en lote
+ * 2) si falla, setPosition uno a uno
+ * Discord: mayor position = mas arriba.
  */
 async function ordenarRoles(guild, tag) {
   await guild.roles.fetch();
-  const { detectados } = escanear(guild);
   const me = guild.members.me;
-  const botPos = me?.roles?.highest?.position ?? 0;
+  if (!me) return { movidos: 0, separadores: 0, fallos: 0, total: 0, botPos: 0, detectados: 0, error: 'sin_me' };
 
-  const ordenados = detectados
-    .filter((d) => d.item.orden != null && d.rol && d.rol.editable && d.rol.position < botPos && !d.rol.managed)
+  const botPos = me.roles.highest.position;
+  const { detectados } = escanear(guild);
+
+  const candidatos = detectados
+    .filter((d) => d.item && d.item.orden != null && d.rol && !d.rol.managed)
     .sort((a, b) => (a.item.orden || 0) - (b.item.orden || 0));
 
-  // Position objetivo: el primero del organigrama queda justo debajo del bot
-  let pos = botPos - 1;
-  const positions = [];
-  let separadores = 0;
+  // Solo los que el bot puede editar (por debajo del bot)
+  const ordenados = candidatos.filter((d) => d.rol.position < botPos && d.rol.editable);
 
+  let pos = botPos - 1;
+  const payload = [];
+  let separadores = 0;
   for (const d of ordenados) {
     if (pos < 1) break;
-    positions.push({ role: d.rol.id, position: pos });
+    payload.push({ role: d.rol.id, position: pos });
     if (d.item.tipo === 'separador' || String(d.item.key || '').startsWith('SEP.')) separadores += 1;
     pos -= 1;
   }
 
   let movidos = 0;
   let fallos = 0;
+  let metodo = 'ninguno';
+  let errorMsg = '';
 
-  // Lotes de 50 (limite practico Discord)
-  for (let i = 0; i < positions.length; i += 50) {
-    const chunk = positions.slice(i, i + 50);
+  if (payload.length === 0) {
+    return {
+      movidos: 0,
+      separadores: 0,
+      fallos: 0,
+      total: ordenados.length,
+      detectados: detectados.length,
+      botPos,
+      metodo,
+      error: detectados.length === 0 ? 'cero_detectados' : 'cero_editables',
+    };
+  }
+
+  // A) Bulk oficial Discord
+  try {
+    await guild.roles.setPositions(payload);
+    movidos = payload.length;
+    metodo = 'setPositions';
+  } catch (e) {
+    errorMsg = String(e.message || e);
+    console.error('[Orden setPositions]', errorMsg);
+
+    // B) REST directo
     try {
-      await guild.roles.setPositions(chunk);
-      movidos += chunk.length;
-    } catch (e) {
-      console.error('[Orden bulk]', e.message || e);
-      // Fallback: uno a uno sin delay largo
-      for (const p of chunk) {
+      const body = payload.map((p) => ({ id: p.role, position: p.position }));
+      await guild.client.rest.patch(`/guilds/${guild.id}/roles`, { body });
+      movidos = payload.length;
+      metodo = 'rest.patch';
+    } catch (e2) {
+      console.error('[Orden REST]', e2.message || e2);
+      errorMsg = String(e2.message || e2);
+
+      // C) Uno a uno (rapido, 80ms)
+      metodo = 'setPosition';
+      for (const p of payload) {
         try {
           const rol = guild.roles.cache.get(p.role);
-          if (rol) {
-            await rol.setPosition(p.position, { reason: `Aegis · orden · ${tag}` });
-            movidos += 1;
+          if (!rol) {
+            fallos += 1;
+            continue;
           }
-        } catch (e2) {
+          await rol.setPosition(p.position, { reason: `Aegis · orden · ${tag}` });
+          movidos += 1;
+          await new Promise((r) => setTimeout(r, 80));
+        } catch (e3) {
           fallos += 1;
+          console.error('[Orden one]', p.role, e3.message || e3);
         }
       }
     }
   }
 
-  return { movidos, separadores, fallos, total: ordenados.length, botPos };
+  return {
+    movidos,
+    separadores,
+    fallos,
+    total: ordenados.length,
+    detectados: detectados.length,
+    botPos,
+    metodo,
+    error: errorMsg || undefined,
+  };
 }
 
 async function onOrganizarEjecutar(interaction) {
   await interaction.deferUpdate();
-  let info = { movidos: 0, separadores: 0, fallos: 0, total: 0, botPos: 0 };
+  let info = {
+    movidos: 0,
+    separadores: 0,
+    fallos: 0,
+    total: 0,
+    detectados: 0,
+    botPos: 0,
+    metodo: '-',
+  };
   try {
     info = await ordenarRoles(interaction.guild, interaction.user.tag);
   } catch (e) {
     console.error('[Organizar]', e);
+    info.error = String(e.message || e);
   }
   auditoria.registrar(interaction.user.id, 'CONFIG_ROLES.ORDENAR', info);
+
+  const lineas = [
+    `Detectados: **${info.detectados}**`,
+    `Editables en cadena: **${info.total}**`,
+    `Movidos: **${info.movidos}**`,
+    `Separadores: **${info.separadores}**`,
+    info.fallos ? `Fallos: **${info.fallos}**` : null,
+    `Posicion bot: **${info.botPos}**`,
+    `Metodo: **${info.metodo || '-'}**`,
+  ];
+  if (info.movidos === 0) {
+    if (info.error === 'cero_detectados') {
+      lineas.push('', '**No se detecto ningun rol del organigrama.** Usa **Analizar** y luego **Crear**.');
+    } else if (info.error === 'cero_editables') {
+      lineas.push('', '**Ningun rol editable bajo el bot.** Revisa Manage Roles y que no esten por encima del bot.');
+    } else if (info.error) {
+      lineas.push('', `Error API: \`${String(info.error).slice(0, 180)}\`);
+    }
+  } else {
+    lineas.push('', 'FUNDACION (arriba) → … → PERMISOS → LLAVES (abajo).');
+  }
+
   await interaction.editReply({
     embeds: [
       embedBase({
         color: info.movidos > 0 ? COLORES.medicina : COLORES.denegado,
-        titulo: 'Orden aplicado',
-        descripcion: [
-          `Cadena organigrama: **${info.total}**`,
-          `Movidos (lote rapido): **${info.movidos}**`,
-          `Separadores: **${info.separadores}**`,
-          info.fallos ? `Fallos: **${info.fallos}**` : null,
-          `Posicion del bot: **${info.botPos}**`,
-          '',
-          info.movidos === 0
-            ? '**0 movidos:** sube el rol del bot por encima de todos y vuelve a intentar.'
-            : 'FUNDACION arriba → LLAVES abajo.',
-        ]
-          .filter(Boolean)
-          .join('\n'),
-        footer: 'Administracion · orden bulk',
+        titulo: info.movidos > 0 ? 'Roles ordenados' : 'No se pudo ordenar',
+        descripcion: lineas.filter(Boolean).join('\n'),
+        footer: 'Administracion · orden v3',
       }),
     ],
     components: [],
@@ -469,7 +562,7 @@ async function onEliminarEjecutar(interaction) {
       await rol.delete(`Aegis · eliminar · ${interaction.user.tag}`);
       getDb().prepare('DELETE FROM roles_map WHERE cargo_key = ?').run(row.cargo_key);
       eliminados += 1;
-      await new Promise((r) => setTimeout(r, 200));
+      await new Promise((r) => setTimeout(r, 150));
     } catch (_) {}
   }
   auditoria.registrar(interaction.user.id, 'CONFIG_ROLES.ELIMINAR', { eliminados });
